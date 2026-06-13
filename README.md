@@ -84,9 +84,9 @@ Legacy single-file configuration remains supported if a JSON file path is provid
 
 | Key | Type | Required | Default | Purpose |
 |-----|------|----------|---------|---------|
-| `admins` | array | Yes | — | Administrator usernames for notifications |
-| `retry.maxAttempts` | int | Yes | — | Maximum number of retry attempts for failed lookups |
-| `retry.delaysMs` | int | Yes | — | Delay (ms) between each retry attempt |
+| `admins` | array | Yes | – | Administrator usernames for notifications |
+| `retry.maxAttempts` | int | Yes | – | Maximum number of retry attempts for failed lookups |
+| `retry.delaysMs` | int | Yes | – | Delay (ms) between each retry attempt |
 | `cacheTtlSeconds` | int | No | `1800` | IP cache lifetime in seconds |
 | `dedupeWindowSeconds` | int | No | `15` | Deduplication window for repeated matches |
 | `ipInfoTimeoutSeconds` | int | No | `2` | API request timeout in seconds |
@@ -121,10 +121,10 @@ An array of rule objects; each item contains:
 Rendered before `onConnect` templates; generates the `{{msg}}` placeholder.
 
 **Available placeholders:**
-- `{{player_id}}` — Player identifier
-- `{{country_name}}` — Full country name
-- `{{country_code}}` — ISO 3166-1 alpha-2 code
-- `{{network_name}}` — ASN name from ipinfo.io
+- `{{player_id}}` – Player identifier
+- `{{country_name}}` – Full country name
+- `{{country_code}}` – ISO 3166-1 alpha-2 code
+- `{{network_name}}` – ASN name from ipinfo.io
 
 **Example:**  
 `"{{player_id}} is connecting from {{country_name}} ({{country_code}}), network: {{network_name}}."`
@@ -134,12 +134,12 @@ Rendered before `onConnect` templates; generates the `{{msg}}` placeholder.
 Executed for each player join.
 
 **Available placeholders:**
-- `{{msg}}` — Pre-rendered join message (from `onConnectMessage`)
-- `{{player_id}}` — Player identifier
-- `{{country_name}}` — Country name (full)
-- `{{country_code}}` — Country code (ISO 3166-1 alpha-2)
-- `{{network_name}}` — Network/ASN name
-- `{{admin}}` — Admin username (only in admin-targeted templates)
+- `{{msg}}` – Pre-rendered join message (from `onConnectMessage`)
+- `{{player_id}}` – Player identifier
+- `{{country_name}}` – Country name (full)
+- `{{country_code}}` – Country code (ISO 3166-1 alpha-2)
+- `{{network_name}}` – Network/ASN name
+- `{{admin}}` – Admin username (only in admin-targeted templates)
 
 **Behaviour:**
 - Templates with `{{admin}}` are emitted once per admin in the `admins` array.
@@ -151,26 +151,26 @@ Executed for each player join.
 Executed when a network matches a rule.
 
 **Available placeholders:**
-- `{{player_id}}` — Player identifier
-- `{{display_name}}` — Player display name
-- `{{ip}}` — IPv4 address
-- `{{country}}` — Country code
-- `{{network_name}}` — Network/ASN name
-- `{{rule_name}}` — Matched rule name
+- `{{player_id}}` – Player identifier
+- `{{display_name}}` – Player display name
+- `{{ip}}` – IPv4 address
+- `{{country}}` – Country code
+- `{{network_name}}` – Network/ASN name
+- `{{rule_name}}` – Matched rule name
 
 ### `actions.onMetrics`
 
 Emitted periodically or on demand (SIGUSR1).
 
 **Available placeholders:**
-- `{{admin}}` — Admin username
-- `{{bans}}` — Total enforcement actions
-- `{{lookups}}` — Total IP lookups
-- `{{cache_hits}}` — Cache hits
-- `{{api_errors}}` — API errors
-- `{{rate_limited}}` — Rate limit events
-- `{{invalid_ips}}` — Invalid IP addresses rejected
-- `{{runtime}}` — Formatted runtime duration
+- `{{admin}}` – Admin username
+- `{{bans}}` – Total enforcement actions
+- `{{lookups}}` – Total IP lookups
+- `{{cache_hits}}` – Cache hits
+- `{{api_errors}}` – API errors
+- `{{rate_limited}}` – Rate limit events
+- `{{invalid_ips}}` – Invalid IP addresses rejected
+- `{{runtime}}` – Formatted runtime duration
 
 ### `actions.onDebug`
 
@@ -244,7 +244,7 @@ PLAYER_ENTERED_GRID player_1 192.168.51.42 Player 1
 - IP lookups reject private and reserved ranges (`private_ip` error); no internal addresses are queried.
 - Invalid IPv4 addresses are rejected early and counted in the `invalid_ips` metric.
 - Deduplication is keyed on `playerId|ruleName` to prevent repeated enforcement.
-- No external package managers or dependencies are required—PHP standard library only.
+- No external package managers or dependencies are required, PHP standard library only.
 - **Retry mechanism:** Triggered by lookup failures or rate limits. Configured delays (`retry.delaysMs`) apply to lookup retries; rate limiting respects ipinfo.io's backoff signals instead.
 - **Value sanitisation:** Template values like `{{player_id}}` are sanitised (alphanumeric, spaces, slashes, dashes, dots, underscores, @); `{{msg}}` in quoted contexts uses proper shell escaping (`\"` and `\\`).
 - **Admin-targeted actions:** Templates containing `{{admin}}` are emitted once per administrator; useful for debug logs, metrics, and personalised notifications.
