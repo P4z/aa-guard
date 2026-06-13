@@ -25,7 +25,7 @@
     },
     {
         "name": "Proton VPN",
-        "pattern": "/(se-|ch-|us-|de-|nl-|fr-|gb-|au-|ca-|jp-|br-|mx-|sg-|hk-|kr-|vn-|nz-|pl-|it-|es-|pt-|gr-|at-|be-|cz-|dk-|ee-|fi-|hu-|ie-|il-|lt-|lu-|lv-|no-|ro-|sk-|proton|protonmail|protonvpn)/i"
+        "pattern": "/(proton|protonmail|protonvpn)/i"
     },
     {
         "name": "Proton infrastructure",
