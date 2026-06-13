@@ -609,6 +609,51 @@ $test->assertEquals(2, count($adminMessagesWithTemplate), 'Does not duplicate ad
 echo "\n";
 
 // ===================================================================
+// Test 10: Provider-specific WHOIS rules (legacy rules preserved)
+// ===================================================================
+echo "Test 10: Provider-specific WHOIS rules\n";
+echo str_repeat("-", 60) . "\n";
+
+$rulesFromConfig = json_decode((string) file_get_contents(__DIR__ . '/config/rules.json'), true);
+$test->assertEquals(true, is_array($rulesFromConfig), 'rules.json decodes to array');
+
+$providerMatcher = new Matcher($rulesFromConfig);
+
+$expectedProviderMatches = [
+    'AMAZON-02' => 'AWS',
+    'Google Cloud Platform' => 'Google Cloud',
+    'Microsoft Corporation' => 'Microsoft Azure',
+    'Oracle Cloud Infrastructure' => 'Oracle Cloud',
+    'Vultr Holdings, LLC' => 'Vultr/Choopa',
+    'Akamai Connected Cloud / Linode LLC' => 'Linode/Akamai',
+    'DigitalOcean, LLC' => 'DigitalOcean',
+    'Hetzner Online GmbH' => 'Hetzner',
+    'OVH SAS' => 'OVH',
+    'Contabo GmbH' => 'Contabo',
+    'ONLINE S.A.S. (Scaleway)' => 'Scaleway',
+];
+
+foreach ($expectedProviderMatches as $networkName => $expectedRuleName) {
+    $result = $providerMatcher->match($networkName);
+    $test->assertEquals(true, $result['matched'], "Matches provider network: {$networkName}");
+    $test->assertEquals($expectedRuleName, $result['ruleName'], "Uses expected rule for provider: {$networkName}");
+}
+
+$expectedNonMatches = [
+    'Orange Polska S.A.',
+    'T-Mobile Polska S.A.',
+    'Enreach Communications',
+    'PLDT Inc.',
+];
+
+foreach ($expectedNonMatches as $networkName) {
+    $result = $providerMatcher->match($networkName);
+    $test->assertEquals(false, $result['matched'], "No broad false-positive match: {$networkName}");
+}
+
+echo "\n";
+
+// ===================================================================
 // Final Report
 // ===================================================================
 exit($test->report());
