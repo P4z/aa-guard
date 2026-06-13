@@ -1,7 +1,8 @@
 {
   "onStartup": [
     "CONSOLE_MESSAGE 0xff0000>> 0x888888[GUARD] 0xffffffAA guard started",
-    "LADDERLOG_WRITE_PLAYER_ENTERED_GRID 1"
+    "LADDERLOG_WRITE_PLAYER_ENTERED_GRID 1",
+    "LADDERLOG_WRITE_INVALID_COMMAND 1"
   ],
   "onDebug": [
     "PLAYER_MESSAGE {{admin}} \"0x00ff00>> 0x888888[GUARD] 0xffffff[{{level}}] {{msg}}\""

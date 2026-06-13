@@ -7,6 +7,7 @@ namespace AAGuard;
 final class Guard
 {
     private const HOUSEKEEPING_INTERVAL_SECONDS = 1.0;
+    private const MIN_REMOTE_COMMAND_LEVEL = 2;
 
     private IpInfoClient $ipInfoClient;
     private Matcher $matcher;
@@ -50,11 +51,15 @@ final class Guard
     public function handleLogLine(string $line): void
     {
         $event = $this->parsePlayerEnteredGrid($line);
-        if ($event === null) {
+        if ($event !== null) {
+            $this->evaluatePlayer($event['playerId'], $event['ip'], $event['displayName'], 0);
             return;
         }
 
-        $this->evaluatePlayer($event['playerId'], $event['ip'], $event['displayName'], 0);
+        $remoteCommand = $this->parseInvalidCommand($line);
+        if ($remoteCommand !== null) {
+            $this->handleRemoteCommand($remoteCommand);
+        }
     }
 
     public function processPendingChecks(): void
@@ -123,6 +128,111 @@ final class Guard
             'ip' => $ip,
             'displayName' => $matches[3],
         ];
+    }
+
+    /**
+     * @return array{commandName:string, playerId:string, playerIp:string, playerLevel:int, commandArgs:string}|null
+     */
+    private function parseInvalidCommand(string $line): ?array
+    {
+        $trimmed = trim($line);
+        if ($trimmed === '') {
+            return null;
+        }
+
+        $matches = [];
+        $ok = preg_match('/^INVALID_COMMAND\s+(\S+)\s+(\S+)\s+(\S+)\s+(\d+)(?:\s+(.*))?$/', $trimmed, $matches);
+        if ($ok !== 1) {
+            return null;
+        }
+
+        $playerIp = $matches[3];
+        if (filter_var($playerIp, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) === false) {
+            return null;
+        }
+
+        $playerLevel = filter_var($matches[4], FILTER_VALIDATE_INT);
+        if ($playerLevel === false) {
+            return null;
+        }
+
+        return [
+            'commandName' => $matches[1],
+            'playerId' => $matches[2],
+            'playerIp' => $playerIp,
+            'playerLevel' => $playerLevel,
+            'commandArgs' => isset($matches[5]) ? trim($matches[5]) : '',
+        ];
+    }
+
+    /**
+     * @param array{commandName:string, playerId:string, playerIp:string, playerLevel:int, commandArgs:string} $event
+     */
+    private function handleRemoteCommand(array $event): void
+    {
+        switch (strtolower($event['commandName'])) {
+            case 'guard':
+                $this->handleGuardRemoteCommand($event);
+                break;
+        }
+    }
+
+    /**
+     * @param array{commandName:string, playerId:string, playerIp:string, playerLevel:int, commandArgs:string} $event
+     */
+    private function handleGuardRemoteCommand(array $event): void
+    {
+        $subcommand = $this->parseRemoteSubcommand($event['commandArgs']);
+        if ($subcommand === null) {
+            return;
+        }
+
+        switch ($subcommand['name']) {
+            case 'metrics':
+                if (!$this->isRemoteCommandAuthorized($event['playerId'], $event['playerLevel'])) {
+                    return;
+                }
+
+                $this->reportMetricsForRecipient($event['playerId']);
+                break;
+        }
+    }
+
+    /**
+     * @return array{name:string, arguments:string}|null
+     */
+    private function parseRemoteSubcommand(string $commandArgs): ?array
+    {
+        $trimmed = trim($commandArgs);
+        if ($trimmed === '') {
+            return null;
+        }
+
+        $parts = preg_split('/\s+/', $trimmed, 2);
+        if (!is_array($parts)) {
+            return null;
+        }
+
+        return [
+            'name' => strtolower($parts[0]),
+            'arguments' => $parts[1] ?? '',
+        ];
+    }
+
+    private function isRemoteCommandAuthorized(string $playerId, int $playerLevel): bool
+    {
+        if ($playerLevel >= self::MIN_REMOTE_COMMAND_LEVEL) {
+            return true;
+        }
+
+        $normalizedPlayerId = strtolower($playerId);
+        foreach ($this->config->adminRecipients as $adminRecipient) {
+            if (strtolower($adminRecipient) === $normalizedPlayerId) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function evaluatePlayer(string $playerId, string $ip, string $displayName, int $attempt): void
@@ -339,13 +449,26 @@ final class Guard
     public function reportMetrics(): void
     {
         $this->logger->debug($this->metrics->toLogString());
+        $this->emitMetricsToRecipients($this->config->adminRecipients);
+    }
 
-        if (empty($this->config->adminRecipients) || empty($this->config->onMetricsActions)) {
+    private function reportMetricsForRecipient(string $admin): void
+    {
+        $this->logger->debug($this->metrics->toLogString());
+        $this->emitMetricsToRecipients([$admin]);
+    }
+
+    /**
+     * @param array<int, string> $adminRecipients
+     */
+    private function emitMetricsToRecipients(array $adminRecipients): void
+    {
+        if (empty($adminRecipients) || empty($this->config->onMetricsActions)) {
             return;
         }
 
         $context = $this->metrics->toTemplateContext();
-        foreach ($this->config->adminRecipients as $admin) {
+        foreach ($adminRecipients as $admin) {
             $this->actions->executeTemplates(
                 $this->config->onMetricsActions,
                 array_merge($context, ['admin' => $admin])

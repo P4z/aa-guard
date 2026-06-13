@@ -13,7 +13,7 @@ Player joins → Guard reads event → Guard queries IP at ipinfo.io → Guard r
 
 - **Non-blocking I/O**: Reads `STDIN` line-by-line using `stream_select` for efficient event handling.
 - **Clean output**: Writes commands to `STDOUT` and flushes immediately; logs to `STDERR` with severity (`DEBUG`, `WARN`, `ERROR`).
-- **Event handling**: Processes `PLAYER_ENTERED_GRID` events with robust parsing for display names containing spaces.
+- **Event handling**: Processes `PLAYER_ENTERED_GRID` and `INVALID_COMMAND` ladderlog events, including arguments containing spaces.
 - **IP validation**: Validates IPv4 format before processing; rejects private and reserved ranges.
 - **GeoIP lookup**: Queries ipinfo.io for network name, country code, and country name; supports Bearer token authentication.
 - **Intelligent caching**: In-memory IP cache (`cacheTtlSeconds`) minimises redundant API calls.
@@ -30,6 +30,7 @@ Player joins → Guard reads event → Guard queries IP at ipinfo.io → Guard r
 - **Admin notifications**: Guarantees per-admin join messages even if the configuration lacks `{{admin}}` template.
 - **Comprehensive metrics**: Tracks bans, lookups, cache hits, API errors, rate-limited events, invalid IPs, and runtime.
 - **Metrics on demand**: Periodic reports (`metricsIntervalSeconds`, `0` to disable) or manual trigger via `SIGUSR1`.
+- **Remote control**: Supports admin/mod remote commands such as `/guard metrics`, replying only to the requesting user.
 - **Graceful lifecycle**: Responds to `SIGTERM` and `SIGINT`; stops cleanly when `STDIN` closes.
 
 ## Requirements
@@ -70,6 +71,25 @@ IPINFO_TOKEN="your_token" screen -dmS aa-guard sh -c 'tail -fn0 -s0.01 /path/to/
 - `SIGINT`: Interrupt gracefully
 - `SIGUSR1`: Emit metrics immediately (requires `pcntl` extension)
 
+## Remote Control
+
+AA Guard can react to `INVALID_COMMAND` ladderlog lines emitted by the server when players type commands such as:
+
+```text
+/guard metrics
+```
+
+Currently supported remote command:
+
+- `/guard metrics` — emits the current guard metrics only to the requesting user
+
+Authorization rules:
+
+- users listed in `admins`
+- moderators/admins with `player_level >= 2` (`player_level` is the ladderlog-reported server permission level)
+
+Unauthorized or unknown remote commands are silently ignored for now.
+
 ## Configuration
 
 Configuration files reside in `config/` by default:
@@ -98,7 +118,7 @@ Legacy single-file configuration remains supported if a JSON file path is provid
 
 | Key | Type | Required | Purpose |
 |-----|------|----------|---------|
-| `onStartup` | array | Yes | Commands executed once at startup |
+| `onStartup` | array | Yes | Commands executed once at startup, including ladderlog subscriptions such as `LADDERLOG_WRITE_PLAYER_ENTERED_GRID 1` and `LADDERLOG_WRITE_INVALID_COMMAND 1` |
 | `onDebug` | array | Yes | Debug message templates (emitted when `debug=true`; once per admin per event) |
 | `onConnectMessage` | string | Yes | Template for join message (`{{msg}}` placeholder; uses `player_id`, `country_name`, `country_code`, `network_name`) |
 | `onConnect` | array | Yes | Action templates for each player join (may reference `{{msg}}`) |
@@ -160,7 +180,7 @@ Executed when a network matches a rule.
 
 ### `actions.onMetrics`
 
-Emitted periodically or on demand (SIGUSR1).
+Emitted periodically, on demand (`SIGUSR1`), or in response to `/guard metrics`.
 
 **Available placeholders:**
 - `{{admin}}` – Admin username
@@ -184,7 +204,9 @@ Placeholders are optional; typically static commands.
 {
   "actions": {
     "onStartup": [
-      "CONSOLE_MESSAGE 0xff0000>> 0x888888[GUARD] 0xffffff AA guard started"
+      "CONSOLE_MESSAGE 0xff0000>> 0x888888[GUARD] 0xffffff AA guard started",
+      "LADDERLOG_WRITE_PLAYER_ENTERED_GRID 1",
+      "LADDERLOG_WRITE_INVALID_COMMAND 1"
     ],
     "onDebug": [
       "PLAYER_MESSAGE {{admin}} \"0xff0000>> 0x888888[GUARD] 0xffffff [{{level}}] {{msg}}\""
@@ -235,6 +257,7 @@ Placeholders are optional; typically static commands.
 
 ```
 PLAYER_ENTERED_GRID player_1 192.168.51.42 Player 1
+INVALID_COMMAND guard admin_1 192.168.51.42 2 metrics
 ```
 
 ## Important Notes
@@ -244,6 +267,8 @@ PLAYER_ENTERED_GRID player_1 192.168.51.42 Player 1
 - IP lookups reject private and reserved ranges (`private_ip` error); no internal addresses are queried.
 - Invalid IPv4 addresses are rejected early and counted in the `invalid_ips` metric.
 - Deduplication is keyed on `playerId|ruleName` to prevent repeated enforcement.
+- Startup actions enable both `LADDERLOG_WRITE_PLAYER_ENTERED_GRID 1` and `LADDERLOG_WRITE_INVALID_COMMAND 1` in the default configuration.
+- Remote metrics requests are authorized for configured admins and users with level `2` or higher, and replies are sent only to the requester.
 - No external package managers or dependencies are required, PHP standard library only.
 - **Retry mechanism:** Triggered by lookup failures or rate limits. Configured delays (`retry.delaysMs`) apply to lookup retries; rate limiting respects ipinfo.io's backoff signals instead.
 - **Value sanitisation:** Template values like `{{player_id}}` are sanitised (alphanumeric, spaces, slashes, dashes, dots, underscores, @); `{{msg}}` in quoted contexts uses proper shell escaping (`\"` and `\\`).
