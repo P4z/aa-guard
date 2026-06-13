@@ -49,11 +49,15 @@
     },
     {
         "name": "Proton VPN",
-        "pattern": "/(proton|protonmail|protonvpn)/i"
+        "pattern": "/(proton|proton\\s*mail|proton\\s*vpn)/i"
     },
     {
         "name": "Proton infrastructure",
         "pattern": "/(Proton|Leaseweb|Multacom|eVirtualServer|Terrahost|Hostkey|Maincubes)/i"
+    },
+    {
+        "name": "Hosting/Datacenter/Cloud",
+        "pattern": "/hosting|datacenter|cloud/i"
     },
     {
         "name": "VPN",
@@ -61,10 +65,6 @@
     },
     {
         "name": "nullrouted",
-        "pattern": "/datacamp|digitalocean/i"
-    },
-    {
-        "name": "Hosting/Datacenter/Cloud",
-        "pattern": "/hosting|datacenter|cloud/i"
+        "pattern": "/datacamp/i"
     }
 ]

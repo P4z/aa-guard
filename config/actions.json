@@ -12,7 +12,7 @@
     "PLAYER_MESSAGE {{admin}} \"0x00ff00>> 0x888888[GUARD] 0xffffff{{msg}}\""
   ],
   "onMatch": [
-    "KICK {{player_id}} Your network is banned. Contact the server administrator if you believe this is a mistake. discord.gg/dcpaauj",
+    "KICK {{player_id}} Your network is banned. Contact the server owner if you believe this is a mistake. https://discord.gg/dcpaauj",
     "CONSOLE_MESSAGE 0xff0000>> 0x888888[GUARD] 0xffffff{{player_id}} was kicked because {{rule_name}} networks are banned."
   ],
   "onMetrics": [
