@@ -1,27 +1,27 @@
 [
     {
         "name": "Microsoft Azure",
-        "pattern": "/\\b(?:microsoft\\s*azure|azure|microsoft\\s+corporation)\\b/i"
+        "pattern": "/\\b(?:microsoft\\s*azure|azure|microsoft\\s*corporation)\\b/i"
     },
     {
         "name": "Oracle Cloud",
-        "pattern": "/\\b(?:oracle\\s*cloud|oracle\\s+corporation|oci)\\b/i"
+        "pattern": "/\\b(?:oracle\\s*cloud|oracle\\s*corporation|oci)\\b/i"
     },
     {
         "name": "Vultr/Choopa",
-        "pattern": "/\\b(?:vultr|choopa|constant\\s+company|as20473)\\b/i"
+        "pattern": "/\\b(?:vultr|choopa|constant\\s*company|as20473)\\b/i"
     },
     {
         "name": "Linode/Akamai",
-        "pattern": "/\\b(?:linode|akamai\\s*connected\\s*cloud|akamai\\s+technologies)\\b/i"
+        "pattern": "/\\b(?:linode|akamai\\s*connected\\s*cloud|akamai\\s*technologies)\\b/i"
     },
     {
         "name": "DigitalOcean",
-        "pattern": "/\\b(?:digitalocean|digital\\s+ocean)\\b/i"
+        "pattern": "/\\b(?:digital\\s*ocean)\\b/i"
     },
     {
         "name": "Hetzner",
-        "pattern": "/\\b(?:hetzner|hetzner\\s+online|as24940)\\b/i"
+        "pattern": "/\\b(?:hetzner|hetzner\\s*online|as24940)\\b/i"
     },
     {
         "name": "OVH",
@@ -33,11 +33,11 @@
     },
     {
         "name": "Scaleway",
-        "pattern": "/\\b(?:scaleway|online\\s+s\\.a\\.s\\.)\\b/i"
+        "pattern": "/\\b(?:scaleway|online\\s*s\\.a\\.s\\.)\\b/i"
     },
     {
         "name": "AWS",
-        "pattern": "/(AMAZON|S3|EC2|DYNAMODB)/i"
+        "pattern": "/(amazon|s3|ec2|dynamodb)/i"
     },
     {
         "name": "Google Cloud",
