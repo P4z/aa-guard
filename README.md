@@ -3,7 +3,7 @@
 ![AA Guard logo](logo.png)
 
 AA Guard monitors ladderlog input and dispatches server commands with precision.
-A lightweight, self-contained solution—no external PHP packages—designed for continuous pipe operation.
+A lightweight, self-contained solution, no external PHP packages, designed for continuous pipe operation.
 
 ## How It Works
 
