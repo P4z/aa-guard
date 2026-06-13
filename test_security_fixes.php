@@ -398,6 +398,8 @@ echo str_repeat("-", 60) . "\n";
 
 $scriptContent = file_get_contents(__DIR__ . '/bin/aa_guard.php');
 $test->assertContains("actions']['onStartup", $scriptContent, "Startup template is loaded from config actions.onStartup");
+$actionsConfig = json_decode((string) file_get_contents(__DIR__ . '/config/actions.json'), true);
+$test->assert(in_array('LADDERLOG_WRITE_INVALID_COMMAND 1', $actionsConfig['onStartup'] ?? [], true), 'Startup actions enable INVALID_COMMAND ladderlog writes');
 
 $countryClient = new IpInfoClient('https://ipinfo.io', null, 2);
 $countryReflection = new ReflectionClass($countryClient);
@@ -548,6 +550,113 @@ $forwardedWithoutCallback = [];
 $loggerWithoutForwarding = new Logger();
 $loggerWithoutForwarding->debug('Debug without callback');
 $test->assertEquals(0, count($forwardedWithoutCallback), "Logger works without debug forwarding callback");
+
+echo "\n";
+
+// ===================================================================
+// Test 9b: Remote command metrics
+// ===================================================================
+echo "Test 9b: Remote command metrics\n";
+echo str_repeat("-", 60) . "\n";
+
+$buildGuardForRemoteCommandTest = function (array $adminRecipients, array &$emittedCommands, Metrics $metrics): Guard {
+    $emittedCommands = [];
+    $actionRegistry = new ActionRegistry(function (string $command) use (&$emittedCommands): void {
+        $emittedCommands[] = $command;
+    });
+
+    return new Guard(
+        new IpInfoClient('https://ipinfo.io', null, 2, 0, $metrics),
+        new Matcher([]),
+        $actionRegistry,
+        new Logger(),
+        new GuardConfig(
+            adminRecipients:     $adminRecipients,
+            onConnectMessageTemplate: '{{player_id}} joined from {{country_name}}',
+            onConnectActions:    ['PLAYER_MESSAGE {{admin}} "{{msg}}"'],
+            onMatchActions:      [],
+            retryDelaysMs:       [100],
+            maxAttempts:         1,
+            cacheTtlSeconds:     60,
+            dedupeWindowSeconds: 15,
+            onMetricsActions:    ['PLAYER_MESSAGE {{admin}} "bans={{bans}} lookups={{lookups}} invalidIps={{invalid_ips}} runtime={{runtime}}"'],
+        ),
+        $metrics
+    );
+};
+
+$remoteParseMetrics = new Metrics();
+$remoteParseCommands = [];
+$remoteParseGuard = $buildGuardForRemoteCommandTest(['internal_admin'], $remoteParseCommands, $remoteParseMetrics);
+$remoteReflection = new ReflectionClass($remoteParseGuard);
+$parseInvalidCommandMethod = $remoteReflection->getMethod('parseInvalidCommand');
+$parseInvalidCommandMethod->setAccessible(true);
+
+$parsedRemoteCommand = $parseInvalidCommandMethod->invoke(
+    $remoteParseGuard,
+    'INVALID_COMMAND guard internal_admin 8.8.8.8 2 metrics now please'
+);
+$test->assertEquals(true, is_array($parsedRemoteCommand), 'Parses valid INVALID_COMMAND line');
+$test->assertEquals('guard', $parsedRemoteCommand['commandName'] ?? null, 'Extracts remote command name');
+$test->assertEquals('internal_admin', $parsedRemoteCommand['playerId'] ?? null, 'Extracts remote command player id');
+$test->assertEquals('8.8.8.8', $parsedRemoteCommand['playerIp'] ?? null, 'Extracts remote command player ip');
+$test->assertEquals(2, $parsedRemoteCommand['playerLevel'] ?? null, 'Extracts remote command player level');
+$test->assertEquals('metrics now please', $parsedRemoteCommand['commandArgs'] ?? null, 'Preserves remote command arguments with spaces');
+
+$malformedRemoteLines = [
+    'INVALID_COMMAND guard internal_admin 8.8.8.8 metrics',
+    'INVALID_COMMAND guard internal_admin 8.8.8.8 not-a-number metrics',
+    'INVALID_COMMAND guard internal_admin not-an-ip 2 metrics',
+];
+
+foreach ($malformedRemoteLines as $malformedRemoteLine) {
+    $test->assertEquals(
+        null,
+        $parseInvalidCommandMethod->invoke($remoteParseGuard, $malformedRemoteLine),
+        "Rejects malformed INVALID_COMMAND line: {$malformedRemoteLine}"
+    );
+}
+
+$internalAdminMetrics = new Metrics();
+$internalAdminMetrics->bans = 3;
+$internalAdminMetrics->lookups = 5;
+$internalAdminMetrics->invalidIps = 1;
+$internalAdminCommands = [];
+$internalAdminGuard = $buildGuardForRemoteCommandTest(['internal_admin', 'other_admin'], $internalAdminCommands, $internalAdminMetrics);
+$internalAdminGuard->handleLogLine('INVALID_COMMAND guard internal_admin 8.8.8.8 0 metrics');
+
+$test->assertEquals(1, count($internalAdminCommands), 'Internal admin metrics request emits one command');
+$test->assertContains('PLAYER_MESSAGE internal_admin', $internalAdminCommands[0] ?? '', 'Internal admin metrics target the requester');
+$test->assertNotContains('other_admin', $internalAdminCommands[0] ?? '', 'Internal admin metrics do not target other admins');
+$test->assertContains('bans=3', $internalAdminCommands[0] ?? '', 'Internal admin metrics include counters');
+
+$moderatorMetrics = new Metrics();
+$moderatorMetrics->bans = 4;
+$moderatorCommands = [];
+$moderatorGuard = $buildGuardForRemoteCommandTest(['internal_admin'], $moderatorCommands, $moderatorMetrics);
+$moderatorGuard->handleLogLine('INVALID_COMMAND guard moderator_user 8.8.4.4 2 metrics');
+
+$test->assertEquals(1, count($moderatorCommands), 'Moderator metrics request emits one command');
+$test->assertContains('PLAYER_MESSAGE moderator_user', $moderatorCommands[0] ?? '', 'Moderator metrics target the requesting moderator');
+
+$unauthorizedMetrics = new Metrics();
+$unauthorizedCommands = [];
+$unauthorizedGuard = $buildGuardForRemoteCommandTest(['internal_admin'], $unauthorizedCommands, $unauthorizedMetrics);
+$unauthorizedGuard->handleLogLine('INVALID_COMMAND guard regular_user 8.8.8.8 1 metrics');
+$test->assertEquals(0, count($unauthorizedCommands), 'Unauthorized remote metrics request is ignored silently');
+
+$unknownRemoteMetrics = new Metrics();
+$unknownRemoteCommands = [];
+$unknownRemoteGuard = $buildGuardForRemoteCommandTest(['internal_admin'], $unknownRemoteCommands, $unknownRemoteMetrics);
+$unknownRemoteGuard->handleLogLine('INVALID_COMMAND guard internal_admin 8.8.8.8 2 status');
+$test->assertEquals(0, count($unknownRemoteCommands), 'Unknown remote guard subcommand is ignored silently');
+
+$remoteJoinMetrics = new Metrics();
+$remoteJoinCommands = [];
+$remoteJoinGuard = $buildGuardForRemoteCommandTest(['internal_admin'], $remoteJoinCommands, $remoteJoinMetrics);
+$remoteJoinGuard->handleLogLine('PLAYER_ENTERED_GRID player_three 8.8.8.8 Player Three');
+$test->assert(count($remoteJoinCommands) >= 1, 'PLAYER_ENTERED_GRID handling still works alongside remote commands');
+$test->assertContains('PLAYER_MESSAGE internal_admin', $remoteJoinCommands[0] ?? '', 'Join handling still emits admin-targeted connect message');
 
 echo "\n";
 
