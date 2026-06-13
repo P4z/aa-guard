@@ -54,8 +54,7 @@ guard compares network against regex rules > guard executes action templates if 
 
 - PHP `8.1+`
 - Access to `https://ipinfo.io`
-- Armagetron server with `ladderlog.txt` (min 0.2.8-sty or 0.4)
-- `PLAYER_ENTERED_GRID` ladderlog enabled (default)
+- Armagetron server with `ladderlog.txt` support (min `0.2.8-sty` or `0.4`)
 
 Recommended server pipeline shape:
 
