@@ -249,6 +249,35 @@ PLAYER_ENTERED_GRID player_1 192.168.51.42 Player 1
 - **Value sanitisation:** Template values like `{{player_id}}` are sanitised (alphanumeric, spaces, slashes, dashes, dots, underscores, @); `{{msg}}` in quoted contexts uses proper shell escaping (`\"` and `\\`).
 - **Admin-targeted actions:** Templates containing `{{admin}}` are emitted once per administrator; useful for debug logs, metrics, and personalised notifications.
 
+## Performance Benchmarking
+
+The repository includes a reproducible synthetic benchmark at `benchmarks/perf_footprint.php`.
+
+Run:
+
+```sh
+php benchmarks/perf_footprint.php
+```
+
+The benchmark focuses on the two hottest maintenance paths under load:
+
+- `guard_housekeeping`: repeated cleanup of large in-memory caches.
+- `ipinfo_rate_limit_prune`: repeated pruning of rate-limit timestamps.
+
+### Latest Local Measurement (2026-06-13, PHP 8.4.21, Linux)
+
+| Scenario | Before (s) | After (s) | Improvement | Peak memory before | Peak memory after |
+|---|---:|---:|---:|---:|---:|
+| `guard_housekeeping` | 9.3785 | 0.0059 | 99.94% faster | 18,874,368 B | 18,874,368 B |
+| `ipinfo_rate_limit_prune` | 5.0232 | 0.0015 | 99.97% faster | 18,874,368 B | 16,777,216 B |
+
+Raw benchmark snapshots are stored in:
+
+- `benchmarks/before.json`
+- `benchmarks/after.json`
+
+These numbers are workload- and machine-specific; use the script above to validate on your host.
+
 ---
 
 ```text

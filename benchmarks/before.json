@@ -1,0 +1,23 @@
+{
+    "phpVersion": "8.4.21",
+    "timestampUtc": "2026-06-13T20:15:19+00:00",
+    "benchmarks": [
+        {
+            "scenario": "guard_housekeeping",
+            "iterations": 3000,
+            "ipCacheSize": 30000,
+            "recentActionsSize": 30000,
+            "seconds": 9.378451347,
+            "memoryDeltaBytes": 0,
+            "peakBytes": 18874368
+        },
+        {
+            "scenario": "ipinfo_rate_limit_prune",
+            "iterations": 3000,
+            "timestamps": 50000,
+            "seconds": 5.023217371,
+            "memoryDeltaBytes": 2097152,
+            "peakBytes": 18874368
+        }
+    ]
+}

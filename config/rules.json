@@ -1,37 +1,5 @@
 [
     {
-        "name": "nullrouted",
-        "pattern": "/datacamp|digitalocean/i"
-    },
-    {
-        "name": "Hosting/Datacenter/Cloud",
-        "pattern": "/hosting|datacenter|cloud/i"
-    },
-    {
-        "name": "VPN",
-        "pattern": "/vpn/i"
-    },
-    {
-        "name": "AWS",
-        "pattern": "/(AMAZON|S3|EC2|DYNAMODB)/i"
-    },
-    {
-        "name": "Google Cloud",
-        "pattern": "/(google.*cloud|gcp|compute.*engine)/i"
-    },
-    {
-        "name": "Mullvad VPN",
-        "pattern": "/(iRegister|DataPacket|M247|hostuniversal|xtom|HostRoyale|Zenlayer|Tzulo|techfutures|31173|PrivateLayer|Creanova|Blix|Veloxserv)/i"
-    },
-    {
-        "name": "Proton VPN",
-        "pattern": "/(proton|protonmail|protonvpn)/i"
-    },
-    {
-        "name": "Proton infrastructure",
-        "pattern": "/(Proton|Leaseweb|Multacom|eVirtualServer|Terrahost|Hostkey|Maincubes)/i"
-    },
-    {
         "name": "Microsoft Azure",
         "pattern": "/\\b(?:microsoft\\s*azure|azure|microsoft\\s+corporation)\\b/i"
     },
@@ -66,5 +34,37 @@
     {
         "name": "Scaleway",
         "pattern": "/\\b(?:scaleway|online\\s+s\\.a\\.s\\.)\\b/i"
+    },
+    {
+        "name": "AWS",
+        "pattern": "/(AMAZON|S3|EC2|DYNAMODB)/i"
+    },
+    {
+        "name": "Google Cloud",
+        "pattern": "/(google.*cloud|gcp|compute.*engine)/i"
+    },
+    {
+        "name": "Mullvad VPN",
+        "pattern": "/(iRegister|DataPacket|M247|hostuniversal|xtom|HostRoyale|Zenlayer|Tzulo|techfutures|31173|PrivateLayer|Creanova|Blix|Veloxserv)/i"
+    },
+    {
+        "name": "Proton VPN",
+        "pattern": "/(proton|protonmail|protonvpn)/i"
+    },
+    {
+        "name": "Proton infrastructure",
+        "pattern": "/(Proton|Leaseweb|Multacom|eVirtualServer|Terrahost|Hostkey|Maincubes)/i"
+    },
+    {
+        "name": "VPN",
+        "pattern": "/vpn/i"
+    },
+    {
+        "name": "nullrouted",
+        "pattern": "/datacamp|digitalocean/i"
+    },
+    {
+        "name": "Hosting/Datacenter/Cloud",
+        "pattern": "/hosting|datacenter|cloud/i"
     }
 ]

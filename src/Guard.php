@@ -6,6 +6,8 @@ namespace AAGuard;
 
 final class Guard
 {
+    private const HOUSEKEEPING_INTERVAL_SECONDS = 1.0;
+
     private IpInfoClient $ipInfoClient;
     private Matcher $matcher;
     private ActionRegistry $actions;
@@ -21,6 +23,8 @@ final class Guard
 
     /** @var array<string, float> */
     private array $recentActions = [];
+
+    private float $nextHousekeepingAt = 0.0;
 
     public function __construct(
         IpInfoClient $ipInfoClient,
@@ -70,6 +74,11 @@ final class Guard
     public function housekeeping(): void
     {
         $now = microtime(true);
+        if ($this->nextHousekeepingAt > $now) {
+            return;
+        }
+
+        $this->nextHousekeepingAt = $now + self::HOUSEKEEPING_INTERVAL_SECONDS;
 
         foreach ($this->ipCache as $ip => $cached) {
             if ($cached['expiresAt'] <= $now) {

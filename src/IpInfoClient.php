@@ -18,6 +18,8 @@ final class IpInfoClient
     /** @var list<float> */
     private array $apiCallTimestamps = [];
 
+    private int $apiCallStartIndex = 0;
+
     public function __construct(
         string $baseUrl = 'https://ipinfo.io',
         ?string $token = null,
@@ -64,7 +66,7 @@ final class IpInfoClient
 
         $now = microtime(true);
         $this->pruneApiCallTimestamps($now);
-        if (count($this->apiCallTimestamps) >= $this->rateLimit) {
+        if ($this->getActiveApiCallCount() >= $this->rateLimit) {
             if ($this->metrics !== null) {
                 $this->metrics->rateLimited++;
             }
@@ -179,7 +181,7 @@ final class IpInfoClient
         }
 
         $this->pruneApiCallTimestamps(microtime(true));
-        return count($this->apiCallTimestamps) >= $this->rateLimit;
+        return $this->getActiveApiCallCount() >= $this->rateLimit;
     }
 
     public function getRateLimitRetryAfterMs(): int
@@ -191,11 +193,11 @@ final class IpInfoClient
         $now = microtime(true);
         $this->pruneApiCallTimestamps($now);
 
-        if ($this->apiCallTimestamps === []) {
+        if ($this->getActiveApiCallCount() === 0) {
             return 100;
         }
 
-        $oldestTimestamp = $this->apiCallTimestamps[0];
+        $oldestTimestamp = $this->apiCallTimestamps[$this->apiCallStartIndex];
         return max(100, (int) ceil(max(0.0, (60.0 - ($now - $oldestTimestamp)) * 1000)));
     }
 
@@ -283,10 +285,36 @@ final class IpInfoClient
 
     private function pruneApiCallTimestamps(float $now): void
     {
-        $this->apiCallTimestamps = array_values(array_filter(
-            $this->apiCallTimestamps,
-            static fn (float $timestamp): bool => ($now - $timestamp) < 60.0
-        ));
+        $cutoff = $now - 60.0;
+        $total = count($this->apiCallTimestamps);
+
+        while (
+            $this->apiCallStartIndex < $total
+            && $this->apiCallTimestamps[$this->apiCallStartIndex] <= $cutoff
+        ) {
+            $this->apiCallStartIndex++;
+        }
+
+        if ($this->apiCallStartIndex === 0) {
+            return;
+        }
+
+        if ($this->apiCallStartIndex >= $total) {
+            $this->apiCallTimestamps = [];
+            $this->apiCallStartIndex = 0;
+            return;
+        }
+
+        // Compact occasionally to keep memory bounded without reallocating on every prune.
+        if ($this->apiCallStartIndex >= 1024 && $this->apiCallStartIndex >= intdiv($total, 2)) {
+            $this->apiCallTimestamps = array_slice($this->apiCallTimestamps, $this->apiCallStartIndex);
+            $this->apiCallStartIndex = 0;
+        }
+    }
+
+    private function getActiveApiCallCount(): int
+    {
+        return max(0, count($this->apiCallTimestamps) - $this->apiCallStartIndex);
     }
 
     /**
