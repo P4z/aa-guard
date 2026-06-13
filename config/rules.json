@@ -4,6 +4,10 @@
         "pattern": "/datacamp|digitalocean/i"
     },
     {
+        "name": "Hosting/Datacenter/Cloud",
+        "pattern": "/hosting|datacenter|cloud/i"
+    },
+    {
         "name": "VPN",
         "pattern": "/vpn/i"
     },
@@ -16,11 +20,7 @@
         "pattern": "/(google.*cloud|gcp|compute.*engine)/i"
     },
     {
-        "name": "Hosting/Datacenter/Cloud",
-        "pattern": "/hosting|datacenter|cloud/i"
-    },
-    {
-        "name": "MULLVAD VPN",
+        "name": "Mullvad VPN",
         "pattern": "/(iRegister|DataPacket|M247|hostuniversal|xtom|HostRoyale|Zenlayer|Tzulo|techfutures|31173|PrivateLayer|Creanova|Blix|Veloxserv)/i"
     },
     {

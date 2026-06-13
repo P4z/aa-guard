@@ -2,195 +2,181 @@
 
 ![AA Guard logo](logo.png)
 
-AA Guard watches ladderlog input and writes server commands.
-It is small, no external PHP packages, built for long-running pipe use.
+AA Guard monitors ladderlog input and dispatches server commands with precision.
+A lightweight, self-contained solution—no external PHP packages—designed for continuous pipe operation.
 
-## Quick Story
+## How It Works
 
-Player joins > guard reads event > guard checks IP at ipinfo.io >
-guard resolves network/country > guard optionally emits join notification >
-guard compares network against regex rules > guard executes action templates if matched.
+Player joins → Guard reads event → Guard queries IP at ipinfo.io → Guard resolves network and country → Guard emits join notification (optional) → Guard matches network against regex rules → Guard executes action templates if matched.
 
 ## Features
 
-- Reads `STDIN` line by line (non-blocking loop with `stream_select`).
-- Writes command output to `STDOUT` and flushes immediately.
-- Writes logs to `STDERR` with level (`DEBUG`, `WARN`, `ERROR`).
-- Handles `PLAYER_ENTERED_GRID` event.
-- Parses display name even when it has spaces.
-- Validates IPv4 format before processing event.
-- Uses ipinfo.io lookup for:
-  - network/as name,
-  - country code,
-  - country name.
-- Supports `IPINFO_TOKEN` via Bearer auth.
-- Supports API timeout config.
-- Supports local rate limit per minute for outbound API calls.
-- Uses in-memory IP cache (`cacheTtlSeconds`).
-- Uses retry queue with custom delays (`retry.delaysMs`); when rate limited by ipinfo.io, overrides delays with rate limit backoff.
-- Uses action dedupe window (`dedupeWindowSeconds`) to reduce repeated punishments.
-- Matches network name with regex rules (`rules[].pattern`).
-- Validates regex rules at startup (invalid regex stops process).
-- Supports startup actions (`actions.onStartup`).
-- Supports join actions (`actions.onConnect`) and custom join message template (`actions.onConnectMessage`).
-- Supports match actions (`actions.onMatch`).
-- Supports metrics actions (`actions.onMetrics`).
-- Supports debug-forward actions (`actions.onDebug`) when `debug=true`.
-- Guarantees per-admin join notice even if `actions.onConnect` forgot `{{admin}}` template.
-- Tracks metrics:
-  - bans,
-  - lookups,
-  - cache hits,
-  - API errors,
-  - rate-limited events,
-  - invalid IPs,
-  - runtime.
-- Periodic metrics report (`metricsIntervalSeconds`, `0` = off).
-- Manual metrics trigger with signal `SIGUSR1`.
-- Graceful stop on `SIGTERM` / `SIGINT`.
-- Stops cleanly if `STDIN` closes.
+- **Non-blocking I/O**: Reads `STDIN` line-by-line using `stream_select` for efficient event handling.
+- **Clean output**: Writes commands to `STDOUT` and flushes immediately; logs to `STDERR` with severity (`DEBUG`, `WARN`, `ERROR`).
+- **Event handling**: Processes `PLAYER_ENTERED_GRID` events with robust parsing for display names containing spaces.
+- **IP validation**: Validates IPv4 format before processing; rejects private and reserved ranges.
+- **GeoIP lookup**: Queries ipinfo.io for network name, country code, and country name; supports Bearer token authentication.
+- **Intelligent caching**: In-memory IP cache (`cacheTtlSeconds`) minimises redundant API calls.
+- **Rate limiting**: Local per-minute rate limiting for API calls; respects ipinfo.io backoff signals.
+- **Retry mechanism**: Configurable retry queue with custom delays (`retry.delaysMs`) for resilience under load.
+- **Action deduplication**: Reduces repeated enforcement using configurable dedupe window (`dedupeWindowSeconds`).
+- **Regex matching**: Compares network names against user-defined rules (`rules[].pattern`) with validation at startup.
+- **Action templates**: Supports lifecycle hooks:
+  - Startup actions (`actions.onStartup`)
+  - Join notifications (`actions.onConnect`, custom message via `actions.onConnectMessage`)
+  - Rule match responses (`actions.onMatch`)
+  - Periodic metrics reports (`actions.onMetrics`)
+  - Debug forwarding (`actions.onDebug`, when `debug=true`)
+- **Admin notifications**: Guarantees per-admin join messages even if the configuration lacks `{{admin}}` template.
+- **Comprehensive metrics**: Tracks bans, lookups, cache hits, API errors, rate-limited events, invalid IPs, and runtime.
+- **Metrics on demand**: Periodic reports (`metricsIntervalSeconds`, `0` to disable) or manual trigger via `SIGUSR1`.
+- **Graceful lifecycle**: Responds to `SIGTERM` and `SIGINT`; stops cleanly when `STDIN` closes.
 
 ## Requirements
 
-- PHP `8.1+`
-- Access to `https://ipinfo.io`
-- Armagetron server with `ladderlog.txt` support (min `0.2.8-sty` or `0.4`)
+- PHP 8.1 or later
+- Outbound HTTPS access to ipinfo.io
+- Armagetron server with `ladderlog.txt` support (version 0.2.8-sty or 0.4+)
 
-Recommended server pipeline shape:
+Typical server pipeline:
 
 ```sh
 tail -fn0 -s0.01 /path/to/commands_file | $armagetron-dedicated | tee -a /path/to/console_log
 ```
 
-## Run
+## Getting Started
 
-Default config:
+**With default configuration:**
 
 ```sh
 tail -fn0 -s0.01 /path/to/server_ladderlog | php /path/to/aa-guard/bin/aa_guard.php | tee -a /path/to/commands_file
 ```
 
-Custom config path:
+**With custom configuration directory:**
 
 ```sh
 tail -fn0 -s0.01 /path/to/server_ladderlog | php /path/to/aa-guard/bin/aa_guard.php /path/to/config_dir | tee -a /path/to/commands_file
 ```
 
-Detached `screen` + token:
+**Detached process with authentication token:**
 
 ```sh
 IPINFO_TOKEN="your_token" screen -dmS aa-guard sh -c 'tail -fn0 -s0.01 /path/to/server_ladderlog | php /path/to/aa-guard/bin/aa_guard.php /path/to/config_dir | tee -a /path/to/commands_file'
 ```
 
-## Runtime Control
+## Signal Handling
 
-- `SIGTERM`: stop
-- `SIGINT`: stop
-- `SIGUSR1`: send metrics now (if `pcntl` signals available)
+- `SIGTERM`: Terminate gracefully
+- `SIGINT`: Interrupt gracefully
+- `SIGUSR1`: Emit metrics immediately (requires `pcntl` extension)
 
-## Config Files
+## Configuration
 
-Default path: `config/`
+Configuration files reside in `config/` by default:
 
-- `config/general.json`: general settings
-- `config/actions.json`: action templates
-- `config/rules.json`: match rules
+- `config/general.json`: Core settings
+- `config/rules.json`: Matching rules
+- `config/actions.json`: Action templates
 
-Legacy single-file config still works if you pass JSON file path explicitly.
+Legacy single-file configuration remains supported if a JSON file path is provided explicitly.
 
-### `general.json` keys
+### `general.json` Settings
 
-- `admins` (array, required)
-- `retry.maxAttempts` (int, required)
-- `retry.delaysMs` (int array, required)
-- `cacheTtlSeconds` (int, default `1800`)
-- `dedupeWindowSeconds` (int, default `15`)
-- `ipInfoTimeoutSeconds` (int, default `2`)
-- `ipInfoRateLimitPerMinute` (int, default `30`)
-- `metricsIntervalSeconds` (int, default `0`)
-- `debug` (bool, default `false`)
+| Key | Type | Required | Default | Purpose |
+|-----|------|----------|---------|---------|
+| `admins` | array | Yes | — | Administrator usernames for notifications |
+| `retry.maxAttempts` | int | Yes | — | Maximum number of retry attempts for failed lookups |
+| `retry.delaysMs` | int | Yes | — | Delay (ms) between each retry attempt |
+| `cacheTtlSeconds` | int | No | `1800` | IP cache lifetime in seconds |
+| `dedupeWindowSeconds` | int | No | `15` | Deduplication window for repeated matches |
+| `ipInfoTimeoutSeconds` | int | No | `2` | API request timeout in seconds |
+| `ipInfoRateLimitPerMinute` | int | No | `30` | Maximum API calls per minute |
+| `metricsIntervalSeconds` | int | No | `0` | Periodic metrics report interval (`0` = disabled) |
+| `debug` | bool | No | `false` | Enable debug logging and forwarding |
 
-### `actions.json` keys
+### `actions.json` Settings
 
-- `onStartup` (array, required): executed once at startup
-- `onDebug` (array, required): templates for debug output (only emitted when `debug=true`; each log event sent to each admin)
-- `onConnectMessage` (string, required): template that generates `{{msg}}` placeholder for join notices (uses player_id, country_name, country_code, network_name context)
-- `onConnect` (array, required): action templates for each player join (can include `{{msg}}` from onConnectMessage)
-- `onMatch` (array, required): action templates when player network matches a rule
-- `onMetrics` (array, optional, default `[]`): templates for metrics report (emitted periodically or on SIGUSR1)
+| Key | Type | Required | Purpose |
+|-----|------|----------|---------|
+| `onStartup` | array | Yes | Commands executed once at startup |
+| `onDebug` | array | Yes | Debug message templates (emitted when `debug=true`; once per admin per event) |
+| `onConnectMessage` | string | Yes | Template for join message (`{{msg}}` placeholder; uses `player_id`, `country_name`, `country_code`, `network_name`) |
+| `onConnect` | array | Yes | Action templates for each player join (may reference `{{msg}}`) |
+| `onMatch` | array | Yes | Action templates when a network matches a rule |
+| `onMetrics` | array | No | Metrics report templates (emitted periodically or on `SIGUSR1`) |
 
-### `rules.json`
+### `rules.json` Structure
 
-Array of rule objects. Each item:
+An array of rule objects; each item contains:
 
-- `name` (non-empty string)
-- `pattern` (non-empty valid regex)
+| Field | Type | Purpose |
+|-------|------|---------|
+| `name` | string | Human-readable rule identifier |
+| `pattern` | string | PCRE-compatible regex for network name matching |
 
-## Template System
+## Templates and Placeholders
 
 ### `actions.onConnectMessage`
 
-Template that builds the `{{msg}}` placeholder. Rendered **before** `onConnect` templates execute.
+Rendered before `onConnect` templates; generates the `{{msg}}` placeholder.
 
-Available placeholders:
-- `{{player_id}}`
-- `{{country_name}}`
-- `{{country_code}}`
-- `{{network_name}}`
+**Available placeholders:**
+- `{{player_id}}` — Player identifier
+- `{{country_name}}` — Full country name
+- `{{country_code}}` — ISO 3166-1 alpha-2 code
+- `{{network_name}}` — ASN name from ipinfo.io
 
-Example: `"{{player_id}} is connecting from {{country_name}} ({{country_code}}), network: {{network_name}}."`
+**Example:**  
+`"{{player_id}} is connecting from {{country_name}} ({{country_code}}), network: {{network_name}}."`
 
 ### `actions.onConnect`
 
-Action templates executed for each player join. Have access to:
-- `{{msg}}` (rendered from `onConnectMessage`)
-- `{{player_id}}`
-- `{{country}}` / `{{country_name}}` / `{{country_code}}`
-- `{{network_name}}`
-- `{{admin}}` (only in templates targeting admin)
+Executed for each player join.
 
-Behavior:
-- Template with `{{admin}}`: emitted once per admin in `admins` array
-- Template without `{{admin}}`: emitted once per join
-- If no admin-targeted template exists, guard auto-sends: `PLAYER_MESSAGE {{admin}} "{{msg}}"`
+**Available placeholders:**
+- `{{msg}}` — Pre-rendered join message (from `onConnectMessage`)
+- `{{player_id}}` — Player identifier
+- `{{country_name}}` — Country name (full)
+- `{{country_code}}` — Country code (ISO 3166-1 alpha-2)
+- `{{network_name}}` — Network/ASN name
+- `{{admin}}` — Admin username (only in admin-targeted templates)
+
+**Behaviour:**
+- Templates with `{{admin}}` are emitted once per admin in the `admins` array.
+- Templates without `{{admin}}` are emitted once per join.
+- If no admin-targeted template is present, the guard automatically sends: `PLAYER_MESSAGE {{admin}} "{{msg}}"`
 
 ### `actions.onMatch`
 
-- `{{player_id}}`
-- `{{display_name}}`
-- `{{ip}}`
-- `{{country}}`
-- `{{network_name}}`
-- `{{rule_name}}`
+Executed when a network matches a rule.
+
+**Available placeholders:**
+- `{{player_id}}` — Player identifier
+- `{{display_name}}` — Player display name
+- `{{ip}}` — IPv4 address
+- `{{country}}` — Country code
+- `{{network_name}}` — Network/ASN name
+- `{{rule_name}}` — Matched rule name
 
 ### `actions.onMetrics`
 
-- `{{admin}}`
-- `{{bans}}`
-- `{{lookups}}`
-- `{{cache_hits}}`
-- `{{api_errors}}`
-- `{{rate_limited}}`
-- `{{invalid_ips}}`
-- `{{runtime}}`
+Emitted periodically or on demand (SIGUSR1).
 
-### `actions.onDebug` (used only when `debug=true`)
+**Available placeholders:**
+- `{{admin}}` — Admin username
+- `{{bans}}` — Total enforcement actions
+- `{{lookups}}` — Total IP lookups
+- `{{cache_hits}}` — Cache hits
+- `{{api_errors}}` — API errors
+- `{{rate_limited}}` — Rate limit events
+- `{{invalid_ips}}` — Invalid IP addresses rejected
+- `{{runtime}}` — Formatted runtime duration
 
-- Usually static commands, placeholders not required.
+### `actions.onDebug`
 
-## Default join message
+Debug logging templates (emitted only when `debug=true`).
 
-Default `{{msg}}` format from `actions.onConnectMessage`:
-
-```txt
-<player_id> is connecting from <country_name> (<country_code>), network: <network_name>.
-```
-
-## Accepted ladderlog line
-
-```txt
-PLAYER_ENTERED_GRID player_1 192.168.51.42 Player 1
-```
+Placeholders are optional; typically static commands.
 
 ## Full Example Config
 
@@ -239,18 +225,32 @@ PLAYER_ENTERED_GRID player_1 192.168.51.42 Player 1
 }
 ```
 
-## Notes (Important)
+## Default Join Message Format
 
-- Config loader exits with code `2` on invalid/missing config fields.
-- Guard exits with code `1` if `stream_select` fails.
-- Lookup rejects private/reserved IP ranges in ipinfo client (`private_ip` error).
-- Invalid IPv4 format is dropped early and increments `invalid_ips` metric.
-- Dedupe key is `playerId|ruleName`.
-- No external dependency manager needed.
-- **Retry mechanism**: Triggered by IP lookup failure or rate limiting. Configured delays (`retry.delaysMs`) apply to lookup failures; rate limiting uses ipinfo.io's backoff timing instead.
-- **Template value sanitization**: Values like `{{player_id}}` are sanitized (alphanumeric + spaces/slashes/dashes/dots/underscores/@); `{{msg}}` in quoted contexts uses quoted escaping (`\"` and `\\`).
-- **Admin-targeted actions**: Templates with `{{admin}}` placeholder are emitted once per admin; useful for debug, metrics, and targeted join notices.
+```
+<player_id> is connecting from <country_name> (<country_code>), network: <network_name>.
+```
+
+## Expected Ladderlog Format
+
+```
+PLAYER_ENTERED_GRID player_1 192.168.51.42 Player 1
+```
+
+## Important Notes
+
+- The configuration loader exits with code `2` if a required field is missing or invalid.
+- The guard exits with code `1` if `stream_select` fails (critical I/O error).
+- IP lookups reject private and reserved ranges (`private_ip` error); no internal addresses are queried.
+- Invalid IPv4 addresses are rejected early and counted in the `invalid_ips` metric.
+- Deduplication is keyed on `playerId|ruleName` to prevent repeated enforcement.
+- No external package managers or dependencies are required—PHP standard library only.
+- **Retry mechanism:** Triggered by lookup failures or rate limits. Configured delays (`retry.delaysMs`) apply to lookup retries; rate limiting respects ipinfo.io's backoff signals instead.
+- **Value sanitisation:** Template values like `{{player_id}}` are sanitised (alphanumeric, spaces, slashes, dashes, dots, underscores, @); `{{msg}}` in quoted contexts uses proper shell escaping (`\"` and `\\`).
+- **Admin-targeted actions:** Templates containing `{{admin}}` are emitted once per administrator; useful for debug logs, metrics, and personalised notifications.
+
+---
 
 ```text
-[ EOF ]  keep server clean, keep grid fair, keep logs loud.
+Keep the server tidy, keep the grid fair, keep the logs forthright.
 ```
