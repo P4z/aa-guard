@@ -1,0 +1,34 @@
+[
+    {
+        "name": "VPN",
+        "pattern": "/vpn/i"
+    },
+    {
+        "name": "Hosting/Datacenter/Cloud",
+        "pattern": "/hosting|datacenter|cloud/i"
+    },
+    {
+        "name": "nullrouted",
+        "pattern": "/datacamp|digitalocean/i"
+    },
+    {
+        "name": "MULLVAD VPN",
+        "pattern": "/(iRegister|DataPacket|M247|hostuniversal|xtom|HostRoyale|Zenlayer|Tzulo|techfutures|31173|PrivateLayer|Creanova|Blix|Veloxserv)/i"
+    },
+    {
+        "name": "AWS",
+        "pattern": "/(AMAZON|S3|EC2|DYNAMODB)/i"
+    },
+    {
+        "name": "Google Cloud",
+        "pattern": "/(google.*cloud|gcp|compute.*engine)/i"
+    },
+    {
+        "name": "Proton VPN",
+        "pattern": "/(se-|ch-|us-|de-|nl-|fr-|gb-|au-|ca-|jp-|br-|mx-|sg-|hk-|kr-|vn-|nz-|pl-|it-|es-|pt-|gr-|at-|be-|cz-|dk-|ee-|fi-|hu-|ie-|il-|lt-|lu-|lv-|no-|ro-|sk-|proton|protonmail|protonvpn)/i"
+    },
+    {
+        "name": "Proton infrastructure",
+        "pattern": "/(Proton|Leaseweb|Multacom|eVirtualServer|Terrahost|Hostkey|Maincubes)/i"
+    }
+]

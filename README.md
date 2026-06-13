@@ -74,13 +74,13 @@ tail -fn0 -s0.01 /path/to/server_ladderlog | php /path/to/aa-guard/bin/aa_guard.
 Custom config path:
 
 ```sh
-tail -fn0 -s0.01 /path/to/server_ladderlog | php /path/to/aa-guard/bin/aa_guard.php /path/to/config.json | tee -a /path/to/commands_file
+tail -fn0 -s0.01 /path/to/server_ladderlog | php /path/to/aa-guard/bin/aa_guard.php /path/to/config_dir | tee -a /path/to/commands_file
 ```
 
 Detached `screen` + token:
 
 ```sh
-IPINFO_TOKEN="your_token" screen -dmS aa-guard sh -c 'tail -fn0 -s0.01 /path/to/server_ladderlog | php /path/to/aa-guard/bin/aa_guard.php /path/to/config.json | tee -a /path/to/commands_file'
+IPINFO_TOKEN="your_token" screen -dmS aa-guard sh -c 'tail -fn0 -s0.01 /path/to/server_ladderlog | php /path/to/aa-guard/bin/aa_guard.php /path/to/config_dir | tee -a /path/to/commands_file'
 ```
 
 ## Runtime Control
@@ -89,14 +89,18 @@ IPINFO_TOKEN="your_token" screen -dmS aa-guard sh -c 'tail -fn0 -s0.01 /path/to/
 - `SIGINT`: stop
 - `SIGUSR1`: send metrics now (if `pcntl` signals available)
 
-## Config File
+## Config Files
 
-Path: `config/aa_guard.json`
+Default path: `config/`
 
-### Top-level keys
+- `config/general.json`: general settings
+- `config/actions.json`: action templates
+- `config/rules.json`: match rules
 
-- `rules` (array, required)
-- `actions` (object, required)
+Legacy single-file config still works if you pass JSON file path explicitly.
+
+### `general.json` keys
+
 - `admins` (array, required)
 - `retry.maxAttempts` (int, required)
 - `retry.delaysMs` (int array, required)
@@ -107,7 +111,7 @@ Path: `config/aa_guard.json`
 - `metricsIntervalSeconds` (int, default `0`)
 - `debug` (bool, default `false`)
 
-### `actions` keys
+### `actions.json` keys
 
 - `onStartup` (array, required): executed once at startup
 - `onDebug` (array, required): templates for debug output (only emitted when `debug=true`; each log event sent to each admin)
@@ -116,9 +120,9 @@ Path: `config/aa_guard.json`
 - `onMatch` (array, required): action templates when player network matches a rule
 - `onMetrics` (array, optional, default `[]`): templates for metrics report (emitted periodically or on SIGUSR1)
 
-### Rule object
+### `rules.json`
 
-Each `rules[]` item:
+Array of rule objects. Each item:
 
 - `name` (non-empty string)
 - `pattern` (non-empty valid regex)

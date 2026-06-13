@@ -16,7 +16,7 @@ require_once __DIR__ . '/../src/autoload.php';
 /** Interval between loop iterations in microseconds */
 const STREAM_SELECT_INTERVAL_US = 200_000;
 
-$configPath = $argv[1] ?? (__DIR__ . '/../config/aa_guard.json');
+$configPath = $argv[1] ?? (__DIR__ . '/../config');
 $config = loadConfig($configPath);
 
 $metrics = new Metrics();
@@ -130,21 +130,10 @@ while ($running) {
 
 function loadConfig(string $configPath): array
 {
-    if (!is_file($configPath)) {
-        fwrite(STDERR, "Config file not found: {$configPath}\n");
-        exit(2);
-    }
-
-    $raw = file_get_contents($configPath);
-    if ($raw === false) {
-        fwrite(STDERR, "Failed to read config file: {$configPath}\n");
-        exit(2);
-    }
-
-    $decoded = json_decode($raw, true);
-    if (!is_array($decoded)) {
-        fwrite(STDERR, "Invalid JSON config: {$configPath}\n");
-        exit(2);
+    if (is_dir($configPath)) {
+        $decoded = loadSplitConfig($configPath);
+    } else {
+        $decoded = loadJsonFile($configPath, 'Config file');
     }
 
     if (!isset($decoded['rules']) || !is_array($decoded['rules'])) {
@@ -239,6 +228,44 @@ function loadConfig(string $configPath): array
     $decoded['actions']['onMetrics'] = isset($decoded['actions']['onMetrics']) && is_array($decoded['actions']['onMetrics'])
         ? $decoded['actions']['onMetrics']
         : [];
+
+    return $decoded;
+}
+
+function loadSplitConfig(string $configDir): array
+{
+    $general = loadJsonFile($configDir . '/general.json', 'Config file');
+    $actions = loadJsonFile($configDir . '/actions.json', 'Config file');
+    $rules = loadJsonFile($configDir . '/rules.json', 'Config file');
+
+    if (!isset($general['actions']) || !is_array($general['actions'])) {
+        $general['actions'] = [];
+    }
+
+    $general['actions'] = array_merge($general['actions'], $actions);
+    $general['rules'] = $rules;
+
+    return $general;
+}
+
+function loadJsonFile(string $path, string $label): array
+{
+    if (!is_file($path)) {
+        fwrite(STDERR, "{$label} not found: {$path}\n");
+        exit(2);
+    }
+
+    $raw = file_get_contents($path);
+    if ($raw === false) {
+        fwrite(STDERR, "Failed to read {$label}: {$path}\n");
+        exit(2);
+    }
+
+    $decoded = json_decode($raw, true);
+    if (!is_array($decoded)) {
+        fwrite(STDERR, "Invalid JSON in {$label}: {$path}\n");
+        exit(2);
+    }
 
     return $decoded;
 }

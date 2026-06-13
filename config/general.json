@@ -1,0 +1,16 @@
+{
+  "admins": [
+    "P4@thefarm51.com",
+    "dplmr@forums"
+  ],
+  "retry": {
+    "maxAttempts": 3,
+    "delaysMs": [250, 750, 1500]
+  },
+  "cacheTtlSeconds": 1800,
+  "dedupeWindowSeconds": 15,
+  "ipInfoTimeoutSeconds": 2,
+  "ipInfoRateLimitPerMinute": 30,
+  "metricsIntervalSeconds": 300,
+  "debug": false
+}
