@@ -140,29 +140,75 @@ final class Guard
             return null;
         }
 
-        $matches = [];
-        $ok = preg_match('/^INVALID_COMMAND\s+(\S+)\s+(\S+)\s+(\S+)\s+(\d+)(?:\s+(.*))?$/', $trimmed, $matches);
-        if ($ok !== 1) {
+        $parts = preg_split('/\s+/', $trimmed);
+        if (!is_array($parts) || count($parts) < 5 || strtoupper($parts[0]) !== 'INVALID_COMMAND') {
             return null;
         }
 
-        $playerIp = $matches[3];
+        // Support both observed ladderlog layouts:
+        // 1) INVALID_COMMAND <command> <player_id> <player_ip> <player_level> [args...]
+        // 2) INVALID_COMMAND <player_id> <player_ip> <player_level> <command> [args...]
+        $parsed = $this->tryParseInvalidCommandLayout(
+            commandName: $parts[1],
+            playerId: $parts[2],
+            playerIp: $parts[3],
+            playerLevel: $parts[4],
+            commandArgs: array_slice($parts, 5)
+        );
+
+        if ($parsed !== null) {
+            return $parsed;
+        }
+
+        return $this->tryParseInvalidCommandLayout(
+            commandName: $parts[4],
+            playerId: $parts[1],
+            playerIp: $parts[2],
+            playerLevel: $parts[3],
+            commandArgs: array_slice($parts, 5)
+        );
+    }
+
+    /**
+     * @param array<int, string> $commandArgs
+     * @return array{commandName:string, playerId:string, playerIp:string, playerLevel:int, commandArgs:string}|null
+     */
+    private function tryParseInvalidCommandLayout(
+        string $commandName,
+        string $playerId,
+        string $playerIp,
+        string $playerLevel,
+        array $commandArgs
+    ): ?array {
+        $normalizedCommandName = $this->normalizeRemoteCommandName($commandName);
+        if ($normalizedCommandName === '') {
+            return null;
+        }
+
         if (filter_var($playerIp, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) === false) {
             return null;
         }
 
-        $playerLevel = filter_var($matches[4], FILTER_VALIDATE_INT);
-        if ($playerLevel === false) {
+        $playerLevelInt = filter_var($playerLevel, FILTER_VALIDATE_INT);
+        if ($playerLevelInt === false) {
             return null;
         }
 
         return [
-            'commandName' => $matches[1],
-            'playerId' => $matches[2],
+            'commandName' => $normalizedCommandName,
+            'playerId' => $playerId,
             'playerIp' => $playerIp,
-            'playerLevel' => $playerLevel,
-            'commandArgs' => isset($matches[5]) ? trim($matches[5]) : '',
+            'playerLevel' => $playerLevelInt,
+            'commandArgs' => trim(implode(' ', $commandArgs)),
         ];
+    }
+
+    private function normalizeRemoteCommandName(string $commandName): string
+    {
+        $normalized = strtolower(trim($commandName));
+        $normalized = trim($normalized, "\"'");
+
+        return ltrim($normalized, '/');
     }
 
     /**

@@ -238,6 +238,29 @@ foreach ($validIps as $validIp) {
 echo "\n";
 
 // ===================================================================
+// Test 3b: Remote command parsing for /guard metrics
+// ===================================================================
+echo "Test 3b: Remote Command Parsing\n";
+echo str_repeat("-", 60) . "\n";
+
+$parseInvalidCommand = $reflection->getMethod('parseInvalidCommand');
+$parseInvalidCommand->setAccessible(true);
+
+// Layout 1: INVALID_COMMAND <command> <player_id> <player_ip> <player_level> [args]
+$remote1 = $parseInvalidCommand->invoke($guard, 'INVALID_COMMAND /guard admin_1 8.8.8.8 2 metrics');
+$test->assertEquals(true, is_array($remote1), "Parses layout 1 with slash command");
+$test->assertEquals('guard', $remote1['commandName'] ?? null, "Normalizes /guard to guard");
+$test->assertEquals('metrics', $remote1['commandArgs'] ?? null, "Extracts metrics subcommand from layout 1");
+
+// Layout 2: INVALID_COMMAND <player_id> <player_ip> <player_level> <command> [args]
+$remote2 = $parseInvalidCommand->invoke($guard, 'INVALID_COMMAND admin_1 8.8.8.8 2 guard metrics');
+$test->assertEquals(true, is_array($remote2), "Parses layout 2 with command after level");
+$test->assertEquals('guard', $remote2['commandName'] ?? null, "Extracts guard command from layout 2");
+$test->assertEquals('metrics', $remote2['commandArgs'] ?? null, "Extracts metrics subcommand from layout 2");
+
+echo "\n";
+
+// ===================================================================
 // Test 4: ReDoS Protection - Matcher handles errors properly
 // ===================================================================
 echo "Test 4: ReDoS Protection in Matcher\n";
