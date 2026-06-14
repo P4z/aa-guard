@@ -1,6 +1,6 @@
 # AA Guard
 
-![AA Guard logo](logo.png)
+![AA Guard logo](img/logo.png)
 
 AA Guard monitors ladderlog input and dispatches server commands with precision.
 A lightweight, self-contained solution, no external PHP packages, designed for continuous pipe operation.
@@ -32,6 +32,14 @@ Player joins → Guard reads event → Guard queries IP at ipinfo.io → Guard r
 - **Metrics on demand**: Periodic reports (`metricsIntervalSeconds`, `0` to disable) or manual trigger via `SIGUSR1`.
 - **Remote control**: Supports admin/mod remote commands such as `/guard metrics`, replying only to the requesting user.
 - **Graceful lifecycle**: Responds to `SIGTERM` and `SIGINT`; stops cleanly when `STDIN` closes.
+
+## In-Action
+
+- Issued matched action with `onConnect` message
+![Action screenshot](img/banned.png)
+
+- Issued metrics action
+![Action screenshot](img/metrics.png)
 
 ## Requirements
 
