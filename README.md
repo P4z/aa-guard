@@ -13,7 +13,7 @@ Player joins → Guard reads event → Guard queries IP at ipinfo.io → Guard r
 
 - **Non-blocking I/O**: Reads `STDIN` line-by-line using `stream_select` for efficient event handling.
 - **Clean output**: Writes commands to `STDOUT` and flushes immediately; logs to `STDERR` with severity (`DEBUG`, `WARN`, `ERROR`).
-- **Event handling**: Processes `PLAYER_ENTERED_GRID` and `INVALID_COMMAND` ladderlog events, including arguments containing spaces.
+- **Event handling**: Processes `PLAYER_ENTERED_GRID`, `PLAYER_LEFT`, and `INVALID_COMMAND` ladderlog events, including arguments containing spaces.
 - **IP validation**: Validates IPv4 format before processing; rejects private and reserved ranges.
 - **GeoIP lookup**: Queries ipinfo.io for network name, country code, and country name; supports Bearer token authentication.
 - **Intelligent caching**: In-memory IP cache (`cacheTtlSeconds`) minimises redundant API calls.
@@ -30,12 +30,13 @@ Player joins → Guard reads event → Guard queries IP at ipinfo.io → Guard r
 - **Admin notifications**: Guarantees per-admin join messages even if the configuration lacks `{{admin}}` template.
 - **Comprehensive metrics**: Tracks bans, lookups, cache hits, API errors, rate-limited events, invalid IPs, and runtime.
 - **Metrics on demand**: Periodic reports (`metricsIntervalSeconds`, `0` to disable) or manual trigger via `SIGUSR1`.
-- **Remote control**: Supports admin/mod remote commands such as `/guard metrics`, replying only to the requesting user.
+- **Remote control**: Supports admin/mod remote commands such as `/guard metrics` and `/guard players`, replying only to the requesting user.
+- **Online player register**: Records `player_id`, `player_name`, `player_country`, and `player_network` on join; removes player from list on `PLAYER_LEFT`.
 - **Graceful lifecycle**: Responds to `SIGTERM` and `SIGINT`; stops cleanly when `STDIN` closes.
 
 ## In-Action
 
-- Issued matched action with `onConnect` message
+- Issued matched action with `onConnect` message (red prefix is public, green is private)
 ![Action screenshot](img/banned.png)
 
 - Issued metrics action
@@ -85,11 +86,13 @@ AA Guard can react to `INVALID_COMMAND` ladderlog lines emitted by the server wh
 
 ```text
 /guard metrics
+/guard players
 ```
 
 Currently supported remote command:
 
 - `/guard metrics` — emits the current guard metrics only to the requesting user
+- `/guard players` — emits currently tracked online players only to the requesting user
 
 Authorization rules:
 
@@ -126,7 +129,7 @@ Legacy single-file configuration remains supported if a JSON file path is provid
 
 | Key | Type | Required | Purpose |
 |-----|------|----------|---------|
-| `onStartup` | array | Yes | Commands executed once at startup, including ladderlog subscriptions such as `LADDERLOG_WRITE_PLAYER_ENTERED_GRID 1` and `LADDERLOG_WRITE_INVALID_COMMAND 1` |
+| `onStartup` | array | Yes | Commands executed once at startup, including ladderlog subscriptions such as `LADDERLOG_WRITE_PLAYER_ENTERED_GRID 1`, `LADDERLOG_WRITE_PLAYER_LEFT 1`, and `LADDERLOG_WRITE_INVALID_COMMAND 1` |
 | `onDebug` | array | Yes | Debug message templates (emitted when `debug=true`; once per admin per event) |
 | `onConnectMessage` | string | Yes | Template for join message (`{{msg}}` placeholder; uses `player_id`, `country_name`, `country_code`, `network_name`) |
 | `onConnect` | array | Yes | Action templates for each player join (may reference `{{msg}}`) |
@@ -198,7 +201,24 @@ Emitted periodically, on demand (`SIGUSR1`), or in response to `/guard metrics`.
 - `{{api_errors}}` – API errors
 - `{{rate_limited}}` – Rate limit events
 - `{{invalid_ips}}` – Invalid IP addresses rejected
+- `{{last_action_who}}` – Last enforced player identifier
+- `{{last_action_why}}` – Last enforcement reason (matched rule name)
 - `{{runtime}}` – Formatted runtime duration
+
+`last_action_who` and `last_action_why` are available before `runtime` in the default metrics template.
+
+### `/guard players` Response Format
+
+Each tracked online player is sent as a dedicated `PLAYER_MESSAGE` line to the requester.
+
+Fields per line:
+
+- `player_id`
+- `player_name`
+- `player_country`
+- `player_network`
+
+If no players are tracked, guard replies with `No tracked players online.`
 
 ### `actions.onDebug`
 
@@ -214,6 +234,7 @@ Placeholders are optional; typically static commands.
     "onStartup": [
       "CONSOLE_MESSAGE 0xff0000>> 0x888888[GUARD] 0xffffff AA guard started",
       "LADDERLOG_WRITE_PLAYER_ENTERED_GRID 1",
+      "LADDERLOG_WRITE_PLAYER_LEFT 1",
       "LADDERLOG_WRITE_INVALID_COMMAND 1"
     ],
     "onDebug": [
@@ -229,7 +250,7 @@ Placeholders are optional; typically static commands.
       "CONSOLE_MESSAGE 0xff0000>> 0x888888[GUARD] 0xffffff {{player_id}} was kicked because {{rule_name}} networks are banned."
     ],
     "onMetrics": [
-      "PLAYER_MESSAGE {{admin}} \"0xff0000>> 0x888888[GUARD] 0xffffff bans={{bans}} lookups={{lookups}} cacheHits={{cache_hits}} apiErrors={{api_errors}} rateLimited={{rate_limited}} invalidIps={{invalid_ips}} runtime={{runtime}}\""
+      "PLAYER_MESSAGE {{admin}} \"0xff0000>> 0x888888[GUARD] 0xffffff bans={{bans}} lookups={{lookups}} cacheHits={{cache_hits}} apiErrors={{api_errors}} rateLimited={{rate_limited}} invalidIps={{invalid_ips}} lastActionWho={{last_action_who}} lastActionWhy={{last_action_why}} runtime={{runtime}}\""
     ]
   },
   "admins": [
@@ -265,7 +286,9 @@ Placeholders are optional; typically static commands.
 
 ```
 PLAYER_ENTERED_GRID player_1 192.168.51.42 Player 1
+PLAYER_LEFT player_1 192.168.51.42 Player 1
 INVALID_COMMAND guard admin_1 192.168.51.42 2 metrics
+INVALID_COMMAND guard admin_1 192.168.51.42 2 players
 ```
 
 ## Important Notes
@@ -275,8 +298,10 @@ INVALID_COMMAND guard admin_1 192.168.51.42 2 metrics
 - IP lookups reject private and reserved ranges (`private_ip` error); no internal addresses are queried.
 - Invalid IPv4 addresses are rejected early and counted in the `invalid_ips` metric.
 - Deduplication is keyed on `playerId|ruleName` to prevent repeated enforcement.
-- Startup actions enable both `LADDERLOG_WRITE_PLAYER_ENTERED_GRID 1` and `LADDERLOG_WRITE_INVALID_COMMAND 1` in the default configuration.
-- Remote metrics requests are authorized for configured admins and users with level `2` or higher, and replies are sent only to the requester.
+- Startup actions enable `LADDERLOG_WRITE_PLAYER_ENTERED_GRID 1`, `LADDERLOG_WRITE_PLAYER_LEFT 1`, and `LADDERLOG_WRITE_INVALID_COMMAND 1` in the default configuration.
+- Remote `/guard metrics` and `/guard players` requests are authorized for configured admins and users with level `2` or higher, and replies are sent only to the requester.
+- Online players are tracked by join/leave events and exposed through `/guard players` with fields: `player_id`, `player_name`, `player_country`, `player_network`.
+- Metrics include last enforcement details via `last_action_who` and `last_action_why` before `runtime`.
 - No external package managers or dependencies are required, PHP standard library only.
 - **Retry mechanism:** Triggered by lookup failures or rate limits. Configured delays (`retry.delaysMs`) apply to lookup retries; rate limiting respects ipinfo.io's backoff signals instead.
 - **Value sanitisation:** Template values like `{{player_id}}` are sanitised (alphanumeric, spaces, slashes, dashes, dots, underscores, @); `{{msg}}` in quoted contexts uses proper shell escaping (`\"` and `\\`).

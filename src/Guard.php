@@ -25,6 +25,9 @@ final class Guard
     /** @var array<string, float> */
     private array $recentActions = [];
 
+    /** @var array<string, array{player_id:string, player_name:string, player_ip:string, player_country:string, player_network:string}> */
+    private array $onlinePlayers = [];
+
     private float $nextHousekeepingAt = 0.0;
 
     public function __construct(
@@ -53,6 +56,12 @@ final class Guard
         $event = $this->parsePlayerEnteredGrid($line);
         if ($event !== null) {
             $this->evaluatePlayer($event['playerId'], $event['ip'], $event['displayName'], 0);
+            return;
+        }
+
+        $leftEvent = $this->parsePlayerLeft($line);
+        if ($leftEvent !== null) {
+            $this->handlePlayerLeft($leftEvent['playerId'], $leftEvent['ip']);
             return;
         }
 
@@ -126,6 +135,29 @@ final class Guard
         return [
             'playerId' => $matches[1],
             'ip' => $ip,
+            'displayName' => $matches[3],
+        ];
+    }
+
+    /**
+     * @return array{playerId:string, ip:string, displayName:string}|null
+     */
+    private function parsePlayerLeft(string $line): ?array
+    {
+        $trimmed = trim($line);
+        if ($trimmed === '') {
+            return null;
+        }
+
+        $matches = [];
+        $ok = preg_match('/^PLAYER_LEFT\s+(\S+)\s+(\S+)\s+(.+)$/', $trimmed, $matches);
+        if ($ok !== 1) {
+            return null;
+        }
+
+        return [
+            'playerId' => $matches[1],
+            'ip' => $matches[2],
             'displayName' => $matches[3],
         ];
     }
@@ -241,6 +273,13 @@ final class Guard
 
                 $this->reportMetricsForRecipient($event['playerId']);
                 break;
+            case 'players':
+                if (!$this->isRemoteCommandAuthorized($event['playerId'], $event['playerLevel'])) {
+                    return;
+                }
+
+                $this->reportPlayersForRecipient($event['playerId']);
+                break;
         }
     }
 
@@ -303,6 +342,9 @@ final class Guard
             }
         }
 
+        $country = $countryName !== 'unknown' ? $countryName : $countryCode;
+        $this->recordOnlinePlayer($playerId, $displayName, $ip, $country, $networkName);
+
         if ($attempt === 0) {
             $this->emitConnectionNote($playerId, $countryCode, $countryName, $networkName);
         }
@@ -315,7 +357,6 @@ final class Guard
             return;
         }
 
-        $country = $countryName !== 'unknown' ? $countryName : $countryCode;
         $match = $this->matcher->match($networkName);
         if ($match['matched'] !== true || $match['ruleName'] === null) {
             $this->logger->debug(sprintf('No banned match for %s (%s) network=%s', $playerId, $ip, $networkName));
@@ -329,6 +370,7 @@ final class Guard
 
         $this->recentActions[$dedupeKey] = microtime(true);
         $this->metrics->bans++;
+        $this->metrics->recordLastAction($playerId, $match['ruleName']);
 
         $this->actions->executeTemplates($this->config->onMatchActions, [
             'player_id' => $playerId,
@@ -346,6 +388,35 @@ final class Guard
             $networkName,
             $match['ruleName']
         ));
+    }
+
+    private function recordOnlinePlayer(
+        string $playerId,
+        string $playerName,
+        string $ip,
+        string $country,
+        string $networkName
+    ): void {
+        $this->onlinePlayers[$playerId] = [
+            'player_id' => $playerId,
+            'player_name' => $playerName,
+            'player_ip' => $ip,
+            'player_country' => $country,
+            'player_network' => $networkName,
+        ];
+    }
+
+    private function handlePlayerLeft(string $playerId, string $ip): void
+    {
+        unset($this->onlinePlayers[$playerId]);
+
+        foreach ($this->pendingChecks as $key => $pending) {
+            if ($pending['playerId'] === $playerId || ($pending['playerId'] . '|' . $pending['ip']) === ($playerId . '|' . $ip)) {
+                unset($this->pendingChecks[$key]);
+            }
+        }
+
+        $this->logger->debug(sprintf('Player left: %s (%s), removed from tracked online players', $playerId, $ip));
     }
 
     /**
@@ -502,6 +573,36 @@ final class Guard
     {
         $this->logger->debug($this->metrics->toLogString());
         $this->emitMetricsToRecipients([$admin]);
+    }
+
+    private function reportPlayersForRecipient(string $admin): void
+    {
+        if (empty($this->onlinePlayers)) {
+            $this->actions->executeTemplatesWithRawValues([
+                'PLAYER_MESSAGE {{admin}} "0x00ff00>> 0x888888[GUARD] 0xffffffNo tracked players online."',
+            ], ['admin' => $admin], []);
+            return;
+        }
+
+        $players = $this->onlinePlayers;
+        uasort($players, static fn (array $a, array $b): int => strcmp($a['player_id'], $b['player_id']));
+
+        foreach ($players as $player) {
+            $line = sprintf(
+                'player_id=%s player_name=%s player_country=%s player_network=%s',
+                $player['player_id'],
+                $player['player_name'],
+                $player['player_country'],
+                $player['player_network']
+            );
+
+            $this->actions->executeTemplatesWithRawValues([
+                'PLAYER_MESSAGE {{admin}} "0x00ff00>> 0x888888[GUARD] 0xffffff{{line}}"',
+            ], [
+                'admin' => $admin,
+                'line' => $line,
+            ], ['line']);
+        }
     }
 
     /**

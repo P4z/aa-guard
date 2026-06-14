@@ -382,6 +382,8 @@ $test->assertEquals(true, isset($ctx['cache_hits']), "Template context has cache
 $test->assertEquals(true, isset($ctx['api_errors']), "Template context has api_errors key");
 $test->assertEquals(true, isset($ctx['rate_limited']), "Template context has rate_limited key");
 $test->assertEquals(true, isset($ctx['invalid_ips']), "Template context has invalid_ips key");
+$test->assertEquals(true, isset($ctx['last_action_who']), "Template context has last_action_who key");
+$test->assertEquals(true, isset($ctx['last_action_why']), "Template context has last_action_why key");
 $test->assertEquals(true, isset($ctx['runtime']), "Template context has runtime key");
 $test->assertEquals(true, preg_match('/^\d+(?:y|mo|d|h|m)(?: \d+(?:y|mo|d|h|m))*$/', $ctx['runtime']) === 1, "runtime has dynamic human-readable format");
 $test->assertEquals(false, str_contains($ctx['runtime'], 's'), "runtime omits seconds");
@@ -409,7 +411,14 @@ $test->assertEquals('0m', $underMinuteCtx['runtime'], "runtime under one minute 
 $logStr = $metrics->toLogString();
 $test->assertEquals(true, str_contains($logStr, 'bans='), "toLogString contains bans");
 $test->assertEquals(true, str_contains($logStr, 'lookups='), "toLogString contains lookups");
+$test->assertEquals(true, str_contains($logStr, 'last_action_who='), "toLogString contains last_action_who");
+$test->assertEquals(true, str_contains($logStr, 'last_action_why='), "toLogString contains last_action_why");
 $test->assertEquals(true, str_contains($logStr, 'runtime='), "toLogString contains runtime");
+
+$metrics->recordLastAction('player_x', 'vpn');
+$ctxAfterAction = $metrics->toTemplateContext();
+$test->assertEquals('player_x', $ctxAfterAction['last_action_who'] ?? null, 'recordLastAction stores last_action_who');
+$test->assertEquals('vpn', $ctxAfterAction['last_action_why'] ?? null, 'recordLastAction stores last_action_why');
 
 echo "\n";
 
@@ -423,6 +432,7 @@ $scriptContent = file_get_contents(__DIR__ . '/bin/aa_guard.php');
 $test->assertContains("actions']['onStartup", $scriptContent, "Startup template is loaded from config actions.onStartup");
 $actionsConfig = json_decode((string) file_get_contents(__DIR__ . '/config/actions.json'), true);
 $test->assert(in_array('LADDERLOG_WRITE_INVALID_COMMAND 1', $actionsConfig['onStartup'] ?? [], true), 'Startup actions enable INVALID_COMMAND ladderlog writes');
+$test->assert(in_array('LADDERLOG_WRITE_PLAYER_LEFT 1', $actionsConfig['onStartup'] ?? [], true), 'Startup actions enable PLAYER_LEFT ladderlog writes');
 
 $countryClient = new IpInfoClient('https://ipinfo.io', null, 2);
 $countryReflection = new ReflectionClass($countryClient);
@@ -673,6 +683,44 @@ $unknownRemoteCommands = [];
 $unknownRemoteGuard = $buildGuardForRemoteCommandTest(['internal_admin'], $unknownRemoteCommands, $unknownRemoteMetrics);
 $unknownRemoteGuard->handleLogLine('INVALID_COMMAND guard internal_admin 8.8.8.8 2 status');
 $test->assertEquals(0, count($unknownRemoteCommands), 'Unknown remote guard subcommand is ignored silently');
+
+$playersMetrics = new Metrics();
+$playersCommands = [];
+$playersGuard = $buildGuardForRemoteCommandTest(['internal_admin'], $playersCommands, $playersMetrics);
+
+$playersReflection = new ReflectionClass($playersGuard);
+$playersCacheProperty = $playersReflection->getProperty('ipCache');
+$playersCacheProperty->setAccessible(true);
+$playersCacheProperty->setValue($playersGuard, [
+    '8.8.8.8' => [
+        'networkName' => 'Example ISP',
+        'country' => 'United States',
+        'countryCode' => 'US',
+        'countryName' => 'United States',
+        'expiresAt' => microtime(true) + 60,
+    ],
+]);
+
+$playersGuard->handleLogLine('PLAYER_ENTERED_GRID player_1 8.8.8.8 Player One');
+$playersGuard->handleLogLine('INVALID_COMMAND guard internal_admin 8.8.8.8 2 players');
+
+$playerListCommands = array_values(array_filter(
+    $playersCommands,
+    static fn (string $command): bool => str_contains($command, 'player_id=player_1')
+));
+
+$test->assertEquals(1, count($playerListCommands), 'Remote players command emits one line per tracked player');
+$test->assertContains('PLAYER_MESSAGE internal_admin', $playerListCommands[0] ?? '', 'Remote players response targets requester only');
+$test->assertContains('player_name=Player One', $playerListCommands[0] ?? '', 'Remote players response includes player_name');
+$test->assertContains('player_country=United States', $playerListCommands[0] ?? '', 'Remote players response includes player_country');
+$test->assertContains('player_network=Example ISP', $playerListCommands[0] ?? '', 'Remote players response includes player_network');
+
+$playersCommands = [];
+$playersGuard->handleLogLine('PLAYER_LEFT player_1 8.8.8.8 Player One');
+$playersGuard->handleLogLine('INVALID_COMMAND guard internal_admin 8.8.8.8 2 players');
+
+$test->assertEquals(1, count($playersCommands), 'Remote players command emits one response when list is empty');
+$test->assertContains('No tracked players online.', $playersCommands[0] ?? '', 'Remote players command reports empty tracked list after PLAYER_LEFT');
 
 $remoteJoinMetrics = new Metrics();
 $remoteJoinCommands = [];

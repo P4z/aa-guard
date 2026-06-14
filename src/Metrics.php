@@ -14,6 +14,8 @@ final class Metrics
     public int $rateLimited = 0;
     public int $bans = 0;
     public int $invalidIps = 0;
+    public string $lastActionWho = 'none';
+    public string $lastActionWhy = 'none';
 
     public function __construct()
     {
@@ -32,8 +34,19 @@ final class Metrics
             'api_errors'   => (string) $this->apiErrors,
             'rate_limited' => (string) $this->rateLimited,
             'invalid_ips'  => (string) $this->invalidIps,
+            'last_action_who' => $this->lastActionWho,
+            'last_action_why' => $this->lastActionWhy,
             'runtime'      => $this->formatRuntime($runtimeSeconds),
         ];
+    }
+
+    public function recordLastAction(string $who, string $why): void
+    {
+        $trimmedWho = trim($who);
+        $trimmedWhy = trim($why);
+
+        $this->lastActionWho = $trimmedWho !== '' ? $trimmedWho : 'unknown';
+        $this->lastActionWhy = $trimmedWhy !== '' ? $trimmedWhy : 'unknown';
     }
 
     public function toLogString(): string
@@ -41,13 +54,15 @@ final class Metrics
         $runtimeSeconds = $this->getRuntimeSeconds();
 
         return sprintf(
-            'Metrics: bans=%d lookups=%d cache_hits=%d api_errors=%d rate_limited=%d invalid_ips=%d runtime=%s',
+            'Metrics: bans=%d lookups=%d cache_hits=%d api_errors=%d rate_limited=%d invalid_ips=%d last_action_who=%s last_action_why=%s runtime=%s',
             $this->bans,
             $this->lookups,
             $this->cacheHits,
             $this->apiErrors,
             $this->rateLimited,
             $this->invalidIps,
+            $this->lastActionWho,
+            $this->lastActionWhy,
             $this->formatRuntime($runtimeSeconds)
         );
     }

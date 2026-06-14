@@ -1,8 +1,9 @@
 {
   "onStartup": [
-    "CONSOLE_MESSAGE 0xff0000>> 0x888888[GUARD] 0xffffffAA guard started",
     "LADDERLOG_WRITE_PLAYER_ENTERED_GRID 1",
-    "LADDERLOG_WRITE_INVALID_COMMAND 1"
+    "LADDERLOG_WRITE_PLAYER_LEFT 1",
+    "LADDERLOG_WRITE_INVALID_COMMAND 1",
+    "CONSOLE_MESSAGE 0xff0000>> 0x888888[GUARD] 0xffffffAA guard started"
   ],
   "onDebug": [
     "PLAYER_MESSAGE {{admin}} \"0x00ff00>> 0x888888[GUARD] 0xffffff[{{level}}] {{msg}}\""
@@ -17,6 +18,6 @@
     "CONSOLE_MESSAGE 0xff0000>> 0x888888[GUARD] 0xffffff{{player_id}} was kicked because {{rule_name}} networks are banned."
   ],
   "onMetrics": [
-    "PLAYER_MESSAGE {{admin}} \"0x00ff00>> 0x888888[GUARD] 0xffffffbans={{bans}} lookups={{lookups}} cacheHits={{cache_hits}} apiErrors={{api_errors}} rateLimited={{rate_limited}} runtime={{runtime}}\""
+    "PLAYER_MESSAGE {{admin}} \"0x00ff00>> 0x888888[GUARD] 0xffffffbans={{bans}} lookups={{lookups}} cacheHits={{cache_hits}} apiErrors={{api_errors}} rateLimited={{rate_limited}} invalidIps={{invalid_ips}} lastActionWho={{last_action_who}} lastActionWhy={{last_action_why}} runtime={{runtime}}\""
   ]
 }
