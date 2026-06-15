@@ -15,7 +15,7 @@
   ],
   "onMatch": [
     "KICK 0xffffff{{player_id}} Your network is banned. Contact the server owner if you believe this is a mistake. https://discord.gg/dcpaauj",
-    "CONSOLE_MESSAGE 0xff0000>> 0x888888[GUARD] 0xffff00{{player_id}} 0xffffffwas kicked because 0xffff00{{rule_name}} 0xffffffnetworks are banned."
+    "CONSOLE_MESSAGE 0xff0000>> 0x888888[GUARD] 0xffff00{{display_name}} 0xffffffwas kicked because 0xffff00{{rule_name}} 0xffffffnetworks are banned."
   ],
   "onMetrics": [
     "PLAYER_MESSAGE {{admin}} \"0x00ff00>> 0x888888[GUARD] 0xffffffbans=0xffff00{{bans}} 0xfffffflookups=0xffff00{{lookups}} 0xffffffcacheHits=0xffff00{{cache_hits}} 0xffffffapiErrors=0xffff00{{api_errors}} 0xffffffrateLimited=0xffff00{{rate_limited}} 0xffffffinvalidIps=0xffff00{{invalid_ips}} 0xfffffflastActionWho=0xffff00{{last_action_who}} 0xfffffflastActionWhy=0xffff00{{last_action_why}} 0xffffffruntime=0xffff00{{runtime}}\""

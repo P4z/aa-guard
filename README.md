@@ -267,7 +267,7 @@ Placeholders are optional; typically static commands.
     "maxAttempts": 3,
     "delaysMs": [250, 750, 1500]
   },
-  "cacheTtlSeconds": 1800,
+  "cacheTtlSeconds": 604800,
   "dedupeWindowSeconds": 15,
   "ipInfoTimeoutSeconds": 2,
   "ipInfoRateLimitPerMinute": 30,
