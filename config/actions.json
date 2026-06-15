@@ -6,18 +6,18 @@
     "CONSOLE_MESSAGE 0xff0000>> 0x888888[GUARD] 0xffffffAA guard started"
   ],
   "onDebug": [
-    "PLAYER_MESSAGE {{admin}} \"0x00ff00>> 0x888888[GUARD] 0xffffff[{{level}}] {{msg}}\""
+    "PLAYER_MESSAGE {{admin}} \"0x00ff00>> 0x888888[GUARD] 0xffff00[{{level}}] {{msg}}\""
   ],
-  "onConnectMessage": "{{player_id}} is connecting from {{country_name}} ({{country_code}}), network: {{network_name}}.",
+  "onConnectMessage": "0xffff00{{player_id}} 0xffffffis connecting from 0xffff00{{country_name}} 0xffffff(0xffff00{{country_code}}0xffffff), network: 0xffff00{{network_name}}0xffffff.",
   "onConnect": [
-    "# CONSOLE_MESSAGE 0xff0000>> 0x888888[GUARD] 0xffffff{{player_id}} is connecting from {{country_name}} ({{country_code}}).",
+    "# CONSOLE_MESSAGE 0xff0000>> 0x888888[GUARD] 0xffff00{{player_id}} 0xffffffis connecting from 0xffff00{{country_name}} 0xffffff(0xffff00{{country_code}}0xffffff).",
     "PLAYER_MESSAGE {{admin}} \"0x00ff00>> 0x888888[GUARD] 0xffffff{{msg}}\""
   ],
   "onMatch": [
-    "KICK {{player_id}} Your network is banned. Contact the server owner if you believe this is a mistake. https://discord.gg/dcpaauj",
-    "CONSOLE_MESSAGE 0xff0000>> 0x888888[GUARD] 0xffffff{{player_id}} was kicked because {{rule_name}} networks are banned."
+    "KICK 0xffffff{{player_id}} Your network is banned. Contact the server owner if you believe this is a mistake. https://discord.gg/dcpaauj",
+    "CONSOLE_MESSAGE 0xff0000>> 0x888888[GUARD] 0xffff00{{player_id}} 0xffffffwas kicked because 0xffff00{{rule_name}} 0xffffffnetworks are banned."
   ],
   "onMetrics": [
-    "PLAYER_MESSAGE {{admin}} \"0x00ff00>> 0x888888[GUARD] 0xffffffbans={{bans}} lookups={{lookups}} cacheHits={{cache_hits}} apiErrors={{api_errors}} rateLimited={{rate_limited}} invalidIps={{invalid_ips}} lastActionWho={{last_action_who}} lastActionWhy={{last_action_why}} runtime={{runtime}}\""
+    "PLAYER_MESSAGE {{admin}} \"0x00ff00>> 0x888888[GUARD] 0xffffffbans=0xffff00{{bans}} 0xfffffflookups=0xffff00{{lookups}} 0xffffffcacheHits=0xffff00{{cache_hits}} 0xffffffapiErrors=0xffff00{{api_errors}} 0xffffffrateLimited=0xffff00{{rate_limited}} 0xffffffinvalidIps=0xffff00{{invalid_ips}} 0xfffffflastActionWho=0xffff00{{last_action_who}} 0xfffffflastActionWhy=0xffff00{{last_action_why}} 0xffffffruntime=0xffff00{{runtime}}\""
   ]
 }
