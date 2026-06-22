@@ -66,17 +66,18 @@ final class ActionRegistry
 
     private function sanitizeValue(string $value): string
     {
-        // Remove control characters
+        // Strip control characters (C0 range + DEL) to prevent newline injection.
+        // \x0A (newline) and \x0D (CR) are the real injection vectors; stripping
+        // the whole 0x00-0x1F range is cheap and covers them all.
+        // Everything else — including shell metacharacters, unicode, clan-tag braces,
+        // accented letters, etc. — is intentionally preserved: the emitter writes
+        // directly to a file handle (no shell involved), so those chars are harmless.
         $value = preg_replace('/[\x00-\x1F\x7F]/', '', $value);
         $value = is_string($value) ? $value : '';
-        
-        // Normalize whitespace
+
+        // Collapse any whitespace that survived (only U+0020 remains after above).
         $value = preg_replace('/\s+/', ' ', trim($value)) ?? trim($value);
-        
-        // Remove shell metacharacters to prevent command injection.
-        // Keep only safe characters: alphanumeric, space, slash, dash, underscore, dot, @
-        $value = preg_replace('/[^a-zA-Z0-9 \/\-_.@]/', '', $value);
-        
+
         return $value;
     }
 

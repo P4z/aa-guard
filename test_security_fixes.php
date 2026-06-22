@@ -130,7 +130,10 @@ $emitter = function (string $command) use (&$commands): void {
 
 $registry = new ActionRegistry($emitter);
 
-// Test dangerous shell metacharacters
+// Shell metacharacters must be PRESERVED. The guard writes directly to a file handle —
+// no shell is involved — so ; $ | ` & ( are harmless and may appear in player names
+// (e.g. "$+3\@|+#"). Only actual control chars (0x00-0x1F, 0x7F) are stripped because
+// they can split the line and inject a second command.
 $dangerousInputs = [
     'player_id' => 'hacker; rm -rf /',
     'display_name' => 'evil$(whoami)',
@@ -140,17 +143,17 @@ $dangerousInputs = [
 ];
 
 $commands = [];
-$registry->executeTemplates(['KICK {{player_id}} {{display_name}}'], $dangerousInputs);
+$registry->executeTemplates(['KICK {{player_id}} {{display_name}} {{ip}} {{network_name}} {{country}}'], $dangerousInputs);
 
 $test->assertEquals(1, count($commands), "Executes one command");
 $command = $commands[0];
 
-$test->assertNotContains(';', $command, "Removes semicolon");
-$test->assertNotContains('$', $command, "Removes dollar sign");
-$test->assertNotContains('|', $command, "Removes pipe");
-$test->assertNotContains('`', $command, "Removes backtick");
-$test->assertNotContains('&', $command, "Removes ampersand");
-$test->assertNotContains('(', $command, "Removes parenthesis");
+$test->assertContains(';', $command, "Preserves semicolon (no shell involved)");
+$test->assertContains('$', $command, "Preserves dollar sign");
+$test->assertContains('|', $command, "Preserves pipe");
+$test->assertContains('`', $command, "Preserves backtick");
+$test->assertContains('&', $command, "Preserves ampersand");
+$test->assertContains('(', $command, "Preserves parenthesis");
 
 // Test safe characters are preserved
 $safeInputs = [
@@ -166,6 +169,35 @@ $command = $commands[0];
 $test->assertContains('player_123', $command, "Preserves alphanumeric with underscore");
 $test->assertContains('Player-One', $command, "Preserves dash");
 $test->assertContains('admin@example.com', $command, "Preserves @ symbol");
+
+// Clan-tag braces and other exotic but printable nickname chars
+$braceInputs = ['player_id' => '{mtp}stabber'];
+$commands = [];
+$registry->executeTemplates(['KICK {{player_id}}'], $braceInputs);
+$command = $commands[0];
+$test->assertContains('{mtp}stabber', $command, "Preserves clan-tag braces in player ID");
+
+// Unicode, accented chars, and exotic punctuation found in real player names
+$nicknameInputs = ['player_id' => '$+3\\@|+# ├│ ^* </s>'];
+$commands = [];
+$registry->executeTemplates(['KICK 0xffffff{{player_id}}'], $nicknameInputs);
+$command = $commands[0];
+$test->assertContains('$+3\\@|+# ├│ ^* </s>', $command, "Preserves unicode and exotic nickname chars");
+
+// Actual newline in a player name would split the emitted line into two commands.
+// It must be stripped.
+$commands = [];
+$registry->executeTemplates(['KICK {{player_id}}'], ['player_id' => "hacker\ncmd_injected"]);
+$test->assertEquals(1, count($commands), "Newline removal still yields one command");
+$command = $commands[0];
+$test->assertNotContains("\n", $command, "Strips actual newline (prevents command injection)");
+$test->assertContains('hacker', $command, "Keeps text before stripped newline");
+
+// Literal backslash-n in player name (two printable chars) must NOT be treated as newline
+$commands = [];
+$registry->executeTemplates(['KICK {{player_id}}'], ['player_id' => 'player\\nname']);
+$command = $commands[0];
+$test->assertContains('player\\nname', $command, "Literal backslash-n preserved, not treated as newline");
 
 // Test control character removal
 $inputWithControl = ['player_id' => "player\x00\x01\x1F\x7F123"];
