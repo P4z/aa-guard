@@ -28,7 +28,7 @@ Player joins → Guard reads event → Guard queries IP at ipinfo.io → Guard r
   - Periodic metrics reports (`actions.onMetrics`)
   - Debug forwarding (`actions.onDebug`, when `debug=true`)
 - **Admin notifications**: Guarantees per-admin join messages even if the configuration lacks `{{admin}}` template.
-- **Comprehensive metrics**: Tracks bans, lookups, cache hits, API errors, rate-limited events, invalid IPs, and runtime.
+- **Comprehensive metrics**: Tracks bans, lookups, cache hits, live cache size, API errors, rate-limited events, invalid IPs, and runtime.
 - **Metrics on demand**: Periodic reports (`metricsIntervalSeconds`, `0` to disable) or manual trigger via `SIGUSR1`.
 - **Remote control**: Supports admin/mod remote commands such as `/guard metrics` and `/guard players`, replying only to the requesting user.
 - **Online player register**: Records `player_id`, `player_name`, `player_country`, and `player_network` on join; removes player from list on `PLAYER_LEFT`.
@@ -198,6 +198,7 @@ Emitted periodically, on demand (`SIGUSR1`), or in response to `/guard metrics`.
 - `{{bans}}` – Total enforcement actions
 - `{{lookups}}` – Total IP lookups
 - `{{cache_hits}}` – Cache hits
+- `{{cache_size}}` – Current in-memory cache entries
 - `{{api_errors}}` – API errors
 - `{{rate_limited}}` – Rate limit events
 - `{{invalid_ips}}` – Invalid IP addresses rejected
@@ -250,7 +251,7 @@ Placeholders are optional; typically static commands.
       "CONSOLE_MESSAGE 0xff0000>> 0x888888[GUARD] 0xffffff {{player_id}} was kicked because {{rule_name}} networks are banned."
     ],
     "onMetrics": [
-      "PLAYER_MESSAGE {{admin}} \"0xff0000>> 0x888888[GUARD] 0xffffff bans={{bans}} lookups={{lookups}} cacheHits={{cache_hits}} apiErrors={{api_errors}} rateLimited={{rate_limited}} invalidIps={{invalid_ips}} lastActionWho={{last_action_who}} lastActionWhy={{last_action_why}} runtime={{runtime}}\""
+      "PLAYER_MESSAGE {{admin}} \"0xff0000>> 0x888888[GUARD] 0xffffff bans={{bans}} lookups={{lookups}} cacheHits={{cache_hits}} cacheSize={{cache_size}} apiErrors={{api_errors}} rateLimited={{rate_limited}} invalidIps={{invalid_ips}} lastActionWho={{last_action_who}} lastActionWhy={{last_action_why}} runtime={{runtime}}\""
     ]
   },
   "admins": [

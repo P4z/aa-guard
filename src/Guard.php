@@ -565,13 +565,13 @@ final class Guard
 
     public function reportMetrics(): void
     {
-        $this->logger->debug($this->metrics->toLogString());
+        $this->logger->debug($this->buildMetricsLogString());
         $this->emitMetricsToRecipients($this->config->adminRecipients);
     }
 
     private function reportMetricsForRecipient(string $admin): void
     {
-        $this->logger->debug($this->metrics->toLogString());
+        $this->logger->debug($this->buildMetricsLogString());
         $this->emitMetricsToRecipients([$admin]);
     }
 
@@ -614,13 +614,26 @@ final class Guard
             return;
         }
 
-        $context = $this->metrics->toTemplateContext();
+        $context = $this->buildMetricsContext();
         foreach ($adminRecipients as $admin) {
             $this->actions->executeTemplates(
                 $this->config->onMetricsActions,
                 array_merge($context, ['admin' => $admin])
             );
         }
+    }
+
+    /** @return array<string, string> */
+    private function buildMetricsContext(): array
+    {
+        return array_merge($this->metrics->toTemplateContext(), [
+            'cache_size' => (string) count($this->ipCache),
+        ]);
+    }
+
+    private function buildMetricsLogString(): string
+    {
+        return sprintf('%s cache_size=%d', $this->metrics->toLogString(), count($this->ipCache));
     }
 
     private function isDuplicateAction(string $dedupeKey): bool

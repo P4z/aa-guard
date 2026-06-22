@@ -644,7 +644,7 @@ $buildGuardForRemoteCommandTest = function (array $adminRecipients, array &$emit
             maxAttempts:         1,
             cacheTtlSeconds:     60,
             dedupeWindowSeconds: 15,
-            onMetricsActions:    ['PLAYER_MESSAGE {{admin}} "bans={{bans}} lookups={{lookups}} invalidIps={{invalid_ips}} runtime={{runtime}}"'],
+            onMetricsActions:    ['PLAYER_MESSAGE {{admin}} "bans={{bans}} lookups={{lookups}} cacheSize={{cache_size}} invalidIps={{invalid_ips}} runtime={{runtime}}"'],
         ),
         $metrics
     );
@@ -688,12 +688,28 @@ $internalAdminMetrics->lookups = 5;
 $internalAdminMetrics->invalidIps = 1;
 $internalAdminCommands = [];
 $internalAdminGuard = $buildGuardForRemoteCommandTest(['internal_admin', 'other_admin'], $internalAdminCommands, $internalAdminMetrics);
+$internalAdminReflection = new ReflectionClass($internalAdminGuard);
+$internalAdminCacheProperty = $internalAdminReflection->getProperty('ipCache');
+$internalAdminCacheProperty->setAccessible(true);
+$internalAdminCacheProperty->setValue($internalAdminGuard, [
+    '8.8.8.8' => [
+        'networkName' => 'ExampleNet',
+        'country' => 'US',
+        'countryCode' => 'US',
+        'countryName' => 'United States',
+        'expiresAt' => microtime(true) + 60,
+    ],
+]);
+$buildMetricsLogStringMethod = $internalAdminReflection->getMethod('buildMetricsLogString');
+$buildMetricsLogStringMethod->setAccessible(true);
+$test->assertContains('cache_size=1', $buildMetricsLogStringMethod->invoke($internalAdminGuard), 'Metrics debug log includes live cache size');
 $internalAdminGuard->handleLogLine('INVALID_COMMAND guard internal_admin 8.8.8.8 0 metrics');
 
 $test->assertEquals(1, count($internalAdminCommands), 'Internal admin metrics request emits one command');
 $test->assertContains('PLAYER_MESSAGE internal_admin', $internalAdminCommands[0] ?? '', 'Internal admin metrics target the requester');
 $test->assertNotContains('other_admin', $internalAdminCommands[0] ?? '', 'Internal admin metrics do not target other admins');
 $test->assertContains('bans=3', $internalAdminCommands[0] ?? '', 'Internal admin metrics include counters');
+$test->assertContains('cacheSize=1', $internalAdminCommands[0] ?? '', 'Internal admin metrics include live cache size');
 
 $moderatorMetrics = new Metrics();
 $moderatorMetrics->bans = 4;
