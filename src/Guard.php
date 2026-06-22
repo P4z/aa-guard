@@ -589,7 +589,7 @@ final class Guard
 
         foreach ($players as $player) {
             $line = sprintf(
-                'player_id=%s player_name=%s player_country=%s player_network=%s',
+                'player_id=0xffff00%s 0xffffffplayer_name=0xffff00%s 0xffffffplayer_country=0xffff00%s 0xffffffplayer_network=0xffff00%s',
                 $player['player_id'],
                 $player['player_name'],
                 $player['player_country'],
