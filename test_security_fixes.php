@@ -754,14 +754,14 @@ $playersGuard->handleLogLine('INVALID_COMMAND guard internal_admin 8.8.8.8 2 pla
 
 $playerListCommands = array_values(array_filter(
     $playersCommands,
-    static fn (string $command): bool => str_contains($command, 'player_id=player_1')
+    static fn (string $command): bool => str_contains($command, 'player_id=0xffff00player_1')
 ));
 
 $test->assertEquals(1, count($playerListCommands), 'Remote players command emits one line per tracked player');
 $test->assertContains('PLAYER_MESSAGE internal_admin', $playerListCommands[0] ?? '', 'Remote players response targets requester only');
-$test->assertContains('player_name=Player One', $playerListCommands[0] ?? '', 'Remote players response includes player_name');
-$test->assertContains('player_country=United States', $playerListCommands[0] ?? '', 'Remote players response includes player_country');
-$test->assertContains('player_network=Example ISP', $playerListCommands[0] ?? '', 'Remote players response includes player_network');
+$test->assertContains('player_name=0xffff00Player One', $playerListCommands[0] ?? '', 'Remote players response includes player_name');
+$test->assertContains('player_country=0xffff00United States', $playerListCommands[0] ?? '', 'Remote players response includes player_country');
+$test->assertContains('player_network=0xffff00Example ISP', $playerListCommands[0] ?? '', 'Remote players response includes player_network');
 
 $playersCommands = [];
 $playersGuard->handleLogLine('PLAYER_LEFT player_1 8.8.8.8 Player One');

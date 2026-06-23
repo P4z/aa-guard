@@ -588,20 +588,15 @@ final class Guard
         uasort($players, static fn (array $a, array $b): int => strcmp($a['player_id'], $b['player_id']));
 
         foreach ($players as $player) {
-            $line = sprintf(
-                'player_id=0xffff00%s 0xffffffplayer_name=0xffff00%s 0xffffffplayer_country=0xffff00%s 0xffffffplayer_network=0xffff00%s',
-                $player['player_id'],
-                $player['player_name'],
-                $player['player_country'],
-                $player['player_network']
-            );
-
             $this->actions->executeTemplatesWithRawValues([
-                'PLAYER_MESSAGE {{admin}} "0x00ff00>> 0x888888[GUARD] 0xffffff{{line}}"',
+                'PLAYER_MESSAGE {{admin}} "0x00ff00>> 0x888888[GUARD] 0xffffff player_id=0xffff00{{player_id}} 0xffffffplayer_name=0xffff00{{player_name}} 0xffffffplayer_country=0xffff00{{player_country}} 0xffffffplayer_network=0xffff00{{player_network}}"',
             ], [
                 'admin' => $admin,
-                'line' => $line,
-            ], ['line']);
+                'player_id' => $player['player_id'],
+                'player_name' => $player['player_name'],
+                'player_country' => $player['player_country'],
+                'player_network' => $player['player_network'],
+            ], []);
         }
     }
 
