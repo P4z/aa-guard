@@ -13,7 +13,7 @@ Player joins → Guard reads event → Guard queries IP at ipinfo.io → Guard r
 
 - **Non-blocking I/O**: Reads `STDIN` line-by-line using `stream_select` for efficient event handling.
 - **Clean output**: Writes commands to `STDOUT` and flushes immediately; logs to `STDERR` with severity (`DEBUG`, `WARN`, `ERROR`).
-- **Event handling**: Processes `PLAYER_ENTERED_GRID`, `PLAYER_RENAMED`, `PLAYER_LEFT`, and `INVALID_COMMAND` ladderlog events, including arguments containing spaces.
+- **Event handling**: Processes `PLAYER_ENTERED_GRID`, `PLAYER_ENTERED_SPECTATOR`, `PLAYER_RENAMED`, `PLAYER_LEFT`, and `INVALID_COMMAND` ladderlog events, including arguments containing spaces.
 - **IP validation**: Validates IPv4 format before processing; rejects private and reserved ranges.
 - **GeoIP lookup**: Queries ipinfo.io for network name, country code, and country name; supports Bearer token authentication.
 - **Intelligent caching**: In-memory IP cache (`cacheTtlSeconds`) minimises redundant API calls.
@@ -129,7 +129,7 @@ Legacy single-file configuration remains supported if a JSON file path is provid
 
 | Key | Type | Required | Purpose |
 |-----|------|----------|---------|
-| `onStartup` | array | Yes | Commands executed once at startup, including ladderlog subscriptions such as `LADDERLOG_WRITE_PLAYER_ENTERED_GRID 1`, `LADDERLOG_WRITE_PLAYER_RENAMED 1`, `LADDERLOG_WRITE_PLAYER_LEFT 1`, and `LADDERLOG_WRITE_INVALID_COMMAND 1` |
+| `onStartup` | array | Yes | Commands executed once at startup, including ladderlog subscriptions such as `LADDERLOG_WRITE_PLAYER_ENTERED_GRID 1`, `LADDERLOG_WRITE_PLAYER_ENTERED_SPECTATOR 1`, `LADDERLOG_WRITE_PLAYER_RENAMED 1`, `LADDERLOG_WRITE_PLAYER_LEFT 1`, and `LADDERLOG_WRITE_INVALID_COMMAND 1` |
 | `onDebug` | array | Yes | Debug message templates (emitted when `debug=true`; once per admin per event) |
 | `onConnectMessage` | string | Yes | Template for join message (`{{msg}}` placeholder; uses `player_id`, `country_name`, `country_code`, `network_name`) |
 | `onConnect` | array | Yes | Action templates for each player join (may reference `{{msg}}`) |
@@ -289,6 +289,7 @@ Placeholders are optional; typically static commands.
 
 ```
 PLAYER_ENTERED_GRID player_1 192.168.51.42 Player 1
+PLAYER_ENTERED_SPECTATOR player_2 192.168.51.43 Player 2
 PLAYER_RENAMED player_1 player_1@clan 192.168.51.42 1 Player 1
 PLAYER_LEFT player_1 192.168.51.42 Player 1
 INVALID_COMMAND guard admin_1 192.168.51.42 2 metrics
@@ -302,7 +303,7 @@ INVALID_COMMAND guard admin_1 192.168.51.42 2 players
 - IP lookups reject private and reserved ranges (`private_ip` error); no internal addresses are queried.
 - Invalid IPv4 addresses are rejected early and counted in the `invalid_ips` metric.
 - Deduplication is keyed on `playerId|ruleName` to prevent repeated enforcement.
-- Startup actions enable `LADDERLOG_WRITE_PLAYER_ENTERED_GRID 1`, `LADDERLOG_WRITE_PLAYER_RENAMED 1`, `LADDERLOG_WRITE_PLAYER_LEFT 1`, and `LADDERLOG_WRITE_INVALID_COMMAND 1` in the default configuration.
+- Startup actions enable `LADDERLOG_WRITE_PLAYER_ENTERED_GRID 1`, `LADDERLOG_WRITE_PLAYER_ENTERED_SPECTATOR 1`, `LADDERLOG_WRITE_PLAYER_RENAMED 1`, `LADDERLOG_WRITE_PLAYER_LEFT 1`, and `LADDERLOG_WRITE_INVALID_COMMAND 1` in the default configuration.
 - Remote `/guard metrics` and `/guard players` requests are authorized for configured admins and users with level `2` or higher, and replies are sent only to the requester.
 - Online players are tracked by join/rename/leave events and exposed through `/guard players` with fields: `player_id`, `player_name`, `player_country`, `player_network`.
 - Metrics include last enforcement details via `last_action_who` and `last_action_why` before `runtime`.

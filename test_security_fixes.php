@@ -300,6 +300,20 @@ $test->assertEquals('192.168.51.69', $renamed['ip'] ?? null, 'Extracts IP from P
 $test->assertEquals(true, $renamed['didLogin'] ?? null, 'Extracts did_login flag from PLAYER_RENAMED');
 $test->assertEquals('vanbozo', $renamed['displayName'] ?? null, 'Extracts screen name from PLAYER_RENAMED');
 
+$parsePlayerEnteredSpectator = $reflection->getMethod('parsePlayerEnteredSpectator');
+$parsePlayerEnteredSpectator->setAccessible(true);
+$spectator = $parsePlayerEnteredSpectator->invoke($guard, 'PLAYER_ENTERED_SPECTATOR spectator_p4 192.168.51.69 P4');
+$test->assertEquals(true, is_array($spectator), 'Parses PLAYER_ENTERED_SPECTATOR line');
+$test->assertEquals('spectator_p4', $spectator['playerId'] ?? null, 'Extracts player id from PLAYER_ENTERED_SPECTATOR');
+$test->assertEquals('192.168.51.69', $spectator['ip'] ?? null, 'Extracts IP from PLAYER_ENTERED_SPECTATOR');
+$test->assertEquals('P4', $spectator['displayName'] ?? null, 'Extracts display name from PLAYER_ENTERED_SPECTATOR');
+$test->assertEquals(true, is_array($parsePlayerEnteredSpectator->invoke($guard, 'PLAYER_ENTERED_SPECTATOR s1 8.8.8.8 Spectator One')), 'Accepts valid spectator entry');
+
+foreach (['999.999.999.999', 'not-an-ip'] as $invalidIp) {
+    $result = $parsePlayerEnteredSpectator->invoke($guard, "PLAYER_ENTERED_SPECTATOR s1 {$invalidIp} Spec");
+    $test->assertEquals(null, $result, "Rejects invalid IP in PLAYER_ENTERED_SPECTATOR: {$invalidIp}");
+}
+
 echo "\n";
 
 // ===================================================================
@@ -473,6 +487,8 @@ echo str_repeat("-", 60) . "\n";
 $scriptContent = file_get_contents(__DIR__ . '/bin/aa_guard.php');
 $test->assertContains("actions']['onStartup", $scriptContent, "Startup template is loaded from config actions.onStartup");
 $actionsConfig = json_decode((string) file_get_contents(__DIR__ . '/config/actions.json'), true);
+$test->assert(in_array('LADDERLOG_WRITE_PLAYER_ENTERED_GRID 1', $actionsConfig['onStartup'] ?? [], true), 'Startup actions enable PLAYER_ENTERED_GRID ladderlog writes');
+$test->assert(in_array('LADDERLOG_WRITE_PLAYER_ENTERED_SPECTATOR 1', $actionsConfig['onStartup'] ?? [], true), 'Startup actions enable PLAYER_ENTERED_SPECTATOR ladderlog writes');
 $test->assert(in_array('LADDERLOG_WRITE_INVALID_COMMAND 1', $actionsConfig['onStartup'] ?? [], true), 'Startup actions enable INVALID_COMMAND ladderlog writes');
 $test->assert(in_array('LADDERLOG_WRITE_PLAYER_RENAMED 1', $actionsConfig['onStartup'] ?? [], true), 'Startup actions enable PLAYER_RENAMED ladderlog writes');
 $test->assert(in_array('LADDERLOG_WRITE_PLAYER_LEFT 1', $actionsConfig['onStartup'] ?? [], true), 'Startup actions enable PLAYER_LEFT ladderlog writes');
@@ -795,6 +811,45 @@ $test->assertEquals(1, count($renamedPlayerListCommands), 'Remote players comman
 $test->assertContains('player_id=0xffff00vanbozo@rcl', $renamedPlayerListCommands[0] ?? '', 'Remote players response uses renamed player id');
 $test->assertContains('player_name=0xffff00vanbozo', $renamedPlayerListCommands[0] ?? '', 'Remote players response keeps screen name after rename');
 $test->assertNotContains('player_id=0xffff00vanbozo 0xffffff', $renamedPlayerListCommands[0] ?? '', 'Remote players response does not include old player id after rename');
+
+// Test spectator and grid players together using fresh Guard instance
+$spectatorMetrics = new Metrics();
+$spectatorCommands = [];
+$spectatorGuard = $buildGuardForRemoteCommandTest(['internal_admin'], $spectatorCommands, $spectatorMetrics);
+$spectatorReflection = new ReflectionClass($spectatorGuard);
+$spectatorCacheProperty = $spectatorReflection->getProperty('ipCache');
+$spectatorCacheProperty->setAccessible(true);
+$spectatorCacheProperty->setValue($spectatorGuard, [
+    '1.1.1.1' => [
+        'networkName' => 'Example ISP',
+        'country' => 'United States',
+        'countryCode' => 'US',
+        'countryName' => 'United States',
+        'expiresAt' => microtime(true) + 60,
+    ],
+    '2.2.2.2' => [
+        'networkName' => 'Another ISP',
+        'country' => 'United Kingdom',
+        'countryCode' => 'UK',
+        'countryName' => 'United Kingdom',
+        'expiresAt' => microtime(true) + 60,
+    ],
+]);
+
+$spectatorGuard->handleLogLine('PLAYER_ENTERED_GRID player_grid 1.1.1.1 Player Grid');
+$spectatorGuard->handleLogLine('PLAYER_ENTERED_SPECTATOR spectator_one 2.2.2.2 Spectator One');
+$spectatorGuard->handleLogLine('INVALID_COMMAND guard internal_admin 8.8.8.8 2 players');
+
+$playerListRows = array_values(array_filter(
+    $spectatorCommands,
+    static fn (string $command): bool => str_contains($command, 'player_id=0xffff00')
+));
+
+$test->assertEquals(2, count($playerListRows), 'Remote players command lists both grid and spectator entries');
+$test->assertContains('player_id=0xffff00player_grid', $playerListRows[0] ?? '', 'Remote players response includes grid player');
+$test->assertContains('player_id=0xffff00spectator_one', $playerListRows[1] ?? '', 'Remote players response includes spectator');
+$test->assertContains('Player Grid', $playerListRows[0] ?? '', 'Remote players response includes grid player display name');
+$test->assertContains('Spectator One', $playerListRows[1] ?? '', 'Remote players response includes spectator display name');
 
 $remoteJoinMetrics = new Metrics();
 $remoteJoinCommands = [];

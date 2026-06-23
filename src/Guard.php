@@ -59,6 +59,12 @@ final class Guard
             return;
         }
 
+        $spectatorEvent = $this->parsePlayerEnteredSpectator($line);
+        if ($spectatorEvent !== null) {
+            $this->evaluatePlayer($spectatorEvent['playerId'], $spectatorEvent['ip'], $spectatorEvent['displayName'], 0);
+            return;
+        }
+
         $renamedEvent = $this->parsePlayerRenamed($line);
         if ($renamedEvent !== null) {
             $this->handlePlayerRenamed(
@@ -130,6 +136,38 @@ final class Guard
 
         $matches = [];
         $ok = preg_match('/^PLAYER_ENTERED_GRID\s+(\S+)\s+(\S+)\s+(.+)$/', $trimmed, $matches);
+        if ($ok !== 1) {
+            return null;
+        }
+
+        $ip = $matches[2];
+        
+        // Validate IP address properly to prevent invalid IPs like 999.999.999.999
+        if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) === false) {
+            $this->logger->warning(sprintf('Invalid IP address: %s', $ip));
+            $this->metrics->invalidIps++;
+            return null;
+        }
+
+        return [
+            'playerId' => $matches[1],
+            'ip' => $ip,
+            'displayName' => $matches[3],
+        ];
+    }
+
+    /**
+     * @return array{playerId:string, ip:string, displayName:string}|null
+     */
+    private function parsePlayerEnteredSpectator(string $line): ?array
+    {
+        $trimmed = trim($line);
+        if ($trimmed === '') {
+            return null;
+        }
+
+        $matches = [];
+        $ok = preg_match('/^PLAYER_ENTERED_SPECTATOR\s+(\S+)\s+(\S+)\s+(.+)$/', $trimmed, $matches);
         if ($ok !== 1) {
             return null;
         }
