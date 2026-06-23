@@ -59,6 +59,17 @@ final class Guard
             return;
         }
 
+        $renamedEvent = $this->parsePlayerRenamed($line);
+        if ($renamedEvent !== null) {
+            $this->handlePlayerRenamed(
+                $renamedEvent['oldPlayerId'],
+                $renamedEvent['newPlayerId'],
+                $renamedEvent['ip'],
+                $renamedEvent['displayName']
+            );
+            return;
+        }
+
         $leftEvent = $this->parsePlayerLeft($line);
         if ($leftEvent !== null) {
             $this->handlePlayerLeft($leftEvent['playerId'], $leftEvent['ip']);
@@ -159,6 +170,31 @@ final class Guard
             'playerId' => $matches[1],
             'ip' => $matches[2],
             'displayName' => $matches[3],
+        ];
+    }
+
+    /**
+     * @return array{oldPlayerId:string, newPlayerId:string, ip:string, didLogin:bool, displayName:string}|null
+     */
+    private function parsePlayerRenamed(string $line): ?array
+    {
+        $trimmed = trim($line);
+        if ($trimmed === '') {
+            return null;
+        }
+
+        $matches = [];
+        $ok = preg_match('/^PLAYER_RENAMED\s+(\S+)\s+(\S+)\s+(\S+)\s+([01])\s+(.+)$/', $trimmed, $matches);
+        if ($ok !== 1) {
+            return null;
+        }
+
+        return [
+            'oldPlayerId' => $matches[1],
+            'newPlayerId' => $matches[2],
+            'ip' => $matches[3],
+            'didLogin' => $matches[4] === '1',
+            'displayName' => $matches[5],
         ];
     }
 
@@ -417,6 +453,41 @@ final class Guard
         }
 
         $this->logger->debug(sprintf('Player left: %s (%s), removed from tracked online players', $playerId, $ip));
+    }
+
+    private function handlePlayerRenamed(string $oldPlayerId, string $newPlayerId, string $ip, string $displayName): void
+    {
+        if (isset($this->onlinePlayers[$oldPlayerId])) {
+            $player = $this->onlinePlayers[$oldPlayerId];
+            unset($this->onlinePlayers[$oldPlayerId]);
+
+            $player['player_id'] = $newPlayerId;
+            $player['player_name'] = $displayName;
+            $player['player_ip'] = $ip;
+
+            $this->onlinePlayers[$newPlayerId] = $player;
+        } elseif (isset($this->onlinePlayers[$newPlayerId])) {
+            $this->onlinePlayers[$newPlayerId]['player_name'] = $displayName;
+            $this->onlinePlayers[$newPlayerId]['player_ip'] = $ip;
+        }
+
+        foreach ($this->pendingChecks as $key => $pending) {
+            if ($pending['playerId'] !== $oldPlayerId) {
+                continue;
+            }
+
+            unset($this->pendingChecks[$key]);
+            $pending['playerId'] = $newPlayerId;
+            $pending['displayName'] = $displayName;
+            $this->pendingChecks[$newPlayerId . '|' . $pending['ip']] = $pending;
+        }
+
+        $this->logger->debug(sprintf(
+            'Player renamed: %s -> %s (%s), updated tracked online players',
+            $oldPlayerId,
+            $newPlayerId,
+            $ip
+        ));
     }
 
     /**

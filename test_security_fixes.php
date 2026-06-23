@@ -290,6 +290,16 @@ $test->assertEquals(true, is_array($remote2), "Parses layout 2 with command afte
 $test->assertEquals('guard', $remote2['commandName'] ?? null, "Extracts guard command from layout 2");
 $test->assertEquals('metrics', $remote2['commandArgs'] ?? null, "Extracts metrics subcommand from layout 2");
 
+$parsePlayerRenamed = $reflection->getMethod('parsePlayerRenamed');
+$parsePlayerRenamed->setAccessible(true);
+$renamed = $parsePlayerRenamed->invoke($guard, 'PLAYER_RENAMED vanbozo vanbozo@rcl 192.168.51.69 1 vanbozo');
+$test->assertEquals(true, is_array($renamed), 'Parses PLAYER_RENAMED line');
+$test->assertEquals('vanbozo', $renamed['oldPlayerId'] ?? null, 'Extracts old player id from PLAYER_RENAMED');
+$test->assertEquals('vanbozo@rcl', $renamed['newPlayerId'] ?? null, 'Extracts new player id from PLAYER_RENAMED');
+$test->assertEquals('192.168.51.69', $renamed['ip'] ?? null, 'Extracts IP from PLAYER_RENAMED');
+$test->assertEquals(true, $renamed['didLogin'] ?? null, 'Extracts did_login flag from PLAYER_RENAMED');
+$test->assertEquals('vanbozo', $renamed['displayName'] ?? null, 'Extracts screen name from PLAYER_RENAMED');
+
 echo "\n";
 
 // ===================================================================
@@ -464,6 +474,7 @@ $scriptContent = file_get_contents(__DIR__ . '/bin/aa_guard.php');
 $test->assertContains("actions']['onStartup", $scriptContent, "Startup template is loaded from config actions.onStartup");
 $actionsConfig = json_decode((string) file_get_contents(__DIR__ . '/config/actions.json'), true);
 $test->assert(in_array('LADDERLOG_WRITE_INVALID_COMMAND 1', $actionsConfig['onStartup'] ?? [], true), 'Startup actions enable INVALID_COMMAND ladderlog writes');
+$test->assert(in_array('LADDERLOG_WRITE_PLAYER_RENAMED 1', $actionsConfig['onStartup'] ?? [], true), 'Startup actions enable PLAYER_RENAMED ladderlog writes');
 $test->assert(in_array('LADDERLOG_WRITE_PLAYER_LEFT 1', $actionsConfig['onStartup'] ?? [], true), 'Startup actions enable PLAYER_LEFT ladderlog writes');
 
 $countryClient = new IpInfoClient('https://ipinfo.io', null, 2);
@@ -769,6 +780,21 @@ $playersGuard->handleLogLine('INVALID_COMMAND guard internal_admin 8.8.8.8 2 pla
 
 $test->assertEquals(1, count($playersCommands), 'Remote players command emits one response when list is empty');
 $test->assertContains('No tracked players online.', $playersCommands[0] ?? '', 'Remote players command reports empty tracked list after PLAYER_LEFT');
+
+$playersCommands = [];
+$playersGuard->handleLogLine('PLAYER_ENTERED_GRID vanbozo 8.8.8.8 vanbozo');
+$playersGuard->handleLogLine('PLAYER_RENAMED vanbozo vanbozo@rcl 192.168.51.69 1 vanbozo');
+$playersGuard->handleLogLine('INVALID_COMMAND guard internal_admin 8.8.8.8 2 players');
+
+$renamedPlayerListCommands = array_values(array_filter(
+    $playersCommands,
+    static fn (string $command): bool => str_contains($command, 'player_id=0xffff00')
+));
+
+$test->assertEquals(1, count($renamedPlayerListCommands), 'Remote players command emits one list row for renamed player');
+$test->assertContains('player_id=0xffff00vanbozo@rcl', $renamedPlayerListCommands[0] ?? '', 'Remote players response uses renamed player id');
+$test->assertContains('player_name=0xffff00vanbozo', $renamedPlayerListCommands[0] ?? '', 'Remote players response keeps screen name after rename');
+$test->assertNotContains('player_id=0xffff00vanbozo 0xffffff', $renamedPlayerListCommands[0] ?? '', 'Remote players response does not include old player id after rename');
 
 $remoteJoinMetrics = new Metrics();
 $remoteJoinCommands = [];

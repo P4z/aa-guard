@@ -13,7 +13,7 @@ Player joins → Guard reads event → Guard queries IP at ipinfo.io → Guard r
 
 - **Non-blocking I/O**: Reads `STDIN` line-by-line using `stream_select` for efficient event handling.
 - **Clean output**: Writes commands to `STDOUT` and flushes immediately; logs to `STDERR` with severity (`DEBUG`, `WARN`, `ERROR`).
-- **Event handling**: Processes `PLAYER_ENTERED_GRID`, `PLAYER_LEFT`, and `INVALID_COMMAND` ladderlog events, including arguments containing spaces.
+- **Event handling**: Processes `PLAYER_ENTERED_GRID`, `PLAYER_RENAMED`, `PLAYER_LEFT`, and `INVALID_COMMAND` ladderlog events, including arguments containing spaces.
 - **IP validation**: Validates IPv4 format before processing; rejects private and reserved ranges.
 - **GeoIP lookup**: Queries ipinfo.io for network name, country code, and country name; supports Bearer token authentication.
 - **Intelligent caching**: In-memory IP cache (`cacheTtlSeconds`) minimises redundant API calls.
@@ -31,7 +31,7 @@ Player joins → Guard reads event → Guard queries IP at ipinfo.io → Guard r
 - **Comprehensive metrics**: Tracks bans, lookups, cache hits, live cache size, API errors, rate-limited events, invalid IPs, and runtime.
 - **Metrics on demand**: Periodic reports (`metricsIntervalSeconds`, `0` to disable) or manual trigger via `SIGUSR1`.
 - **Remote control**: Supports admin/mod remote commands such as `/guard metrics` and `/guard players`, replying only to the requesting user.
-- **Online player register**: Records `player_id`, `player_name`, `player_country`, and `player_network` on join; removes player from list on `PLAYER_LEFT`.
+- **Online player register**: Records `player_id`, `player_name`, `player_country`, and `player_network` on join; updates tracked identity on `PLAYER_RENAMED`; removes player from list on `PLAYER_LEFT`.
 - **Graceful lifecycle**: Responds to `SIGTERM` and `SIGINT`; stops cleanly when `STDIN` closes.
 
 ## In-Action
@@ -46,7 +46,7 @@ Player joins → Guard reads event → Guard queries IP at ipinfo.io → Guard r
 
 - PHP 8.1 or later
 - Outbound HTTPS access to ipinfo.io
-- Armagetron server with `ladderlog.txt` support (version 0.2.8-sty or 0.4+)
+- Armagetron server with `ladderlog.txt` support (version at least 0.2.8-sty or 0.4)
 
 Typical server pipeline:
 
@@ -129,7 +129,7 @@ Legacy single-file configuration remains supported if a JSON file path is provid
 
 | Key | Type | Required | Purpose |
 |-----|------|----------|---------|
-| `onStartup` | array | Yes | Commands executed once at startup, including ladderlog subscriptions such as `LADDERLOG_WRITE_PLAYER_ENTERED_GRID 1`, `LADDERLOG_WRITE_PLAYER_LEFT 1`, and `LADDERLOG_WRITE_INVALID_COMMAND 1` |
+| `onStartup` | array | Yes | Commands executed once at startup, including ladderlog subscriptions such as `LADDERLOG_WRITE_PLAYER_ENTERED_GRID 1`, `LADDERLOG_WRITE_PLAYER_RENAMED 1`, `LADDERLOG_WRITE_PLAYER_LEFT 1`, and `LADDERLOG_WRITE_INVALID_COMMAND 1` |
 | `onDebug` | array | Yes | Debug message templates (emitted when `debug=true`; once per admin per event) |
 | `onConnectMessage` | string | Yes | Template for join message (`{{msg}}` placeholder; uses `player_id`, `country_name`, `country_code`, `network_name`) |
 | `onConnect` | array | Yes | Action templates for each player join (may reference `{{msg}}`) |
@@ -212,6 +212,8 @@ Emitted periodically, on demand (`SIGUSR1`), or in response to `/guard metrics`.
 
 Each tracked online player is sent as a dedicated `PLAYER_MESSAGE` line to the requester.
 
+`PLAYER_RENAMED` events move tracked entry from old `player_id` to new `player_id` and update `player_name` from ladderlog screen name field.
+
 Fields per line:
 
 - `player_id`
@@ -287,6 +289,7 @@ Placeholders are optional; typically static commands.
 
 ```
 PLAYER_ENTERED_GRID player_1 192.168.51.42 Player 1
+PLAYER_RENAMED player_1 player_1@clan 192.168.51.42 1 Player 1
 PLAYER_LEFT player_1 192.168.51.42 Player 1
 INVALID_COMMAND guard admin_1 192.168.51.42 2 metrics
 INVALID_COMMAND guard admin_1 192.168.51.42 2 players
@@ -299,9 +302,9 @@ INVALID_COMMAND guard admin_1 192.168.51.42 2 players
 - IP lookups reject private and reserved ranges (`private_ip` error); no internal addresses are queried.
 - Invalid IPv4 addresses are rejected early and counted in the `invalid_ips` metric.
 - Deduplication is keyed on `playerId|ruleName` to prevent repeated enforcement.
-- Startup actions enable `LADDERLOG_WRITE_PLAYER_ENTERED_GRID 1`, `LADDERLOG_WRITE_PLAYER_LEFT 1`, and `LADDERLOG_WRITE_INVALID_COMMAND 1` in the default configuration.
+- Startup actions enable `LADDERLOG_WRITE_PLAYER_ENTERED_GRID 1`, `LADDERLOG_WRITE_PLAYER_RENAMED 1`, `LADDERLOG_WRITE_PLAYER_LEFT 1`, and `LADDERLOG_WRITE_INVALID_COMMAND 1` in the default configuration.
 - Remote `/guard metrics` and `/guard players` requests are authorized for configured admins and users with level `2` or higher, and replies are sent only to the requester.
-- Online players are tracked by join/leave events and exposed through `/guard players` with fields: `player_id`, `player_name`, `player_country`, `player_network`.
+- Online players are tracked by join/rename/leave events and exposed through `/guard players` with fields: `player_id`, `player_name`, `player_country`, `player_network`.
 - Metrics include last enforcement details via `last_action_who` and `last_action_why` before `runtime`.
 - No external package managers or dependencies are required, PHP standard library only.
 - **Retry mechanism:** Triggered by lookup failures or rate limits. Configured delays (`retry.delaysMs`) apply to lookup retries; rate limiting respects ipinfo.io's backoff signals instead.
