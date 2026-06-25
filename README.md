@@ -193,6 +193,8 @@ Executed when a network matches a rule.
 
 Emitted periodically, on demand (`SIGUSR1`), or in response to `/guard metrics`.
 
+For periodic and `SIGUSR1` reports, templates are emitted only to admins currently present in the tracked online player list. Absent admins do not receive `onMetrics` output.
+
 **Available placeholders:**
 - `{{admin}}` – Admin username
 - `{{bans}}` – Total enforcement actions

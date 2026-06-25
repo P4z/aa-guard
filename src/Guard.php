@@ -681,7 +681,7 @@ final class Guard
     private function reportMetricsForRecipient(string $admin): void
     {
         $this->logger->debug($this->buildMetricsLogString());
-        $this->emitMetricsToRecipients([$admin]);
+        $this->emitMetricsToRecipients([$admin], [$admin]);
     }
 
     private function reportPlayersForRecipient(string $admin): void
@@ -711,20 +711,61 @@ final class Guard
 
     /**
      * @param array<int, string> $adminRecipients
+     * @param array<int, string> $knownPresentRecipients
      */
-    private function emitMetricsToRecipients(array $adminRecipients): void
+    private function emitMetricsToRecipients(array $adminRecipients, array $knownPresentRecipients = []): void
     {
         if (empty($adminRecipients) || empty($this->config->onMetricsActions)) {
             return;
         }
 
+        $presentAdminRecipients = $this->filterPresentAdminRecipients($adminRecipients, $knownPresentRecipients);
+        if (empty($presentAdminRecipients)) {
+            return;
+        }
+
         $context = $this->buildMetricsContext();
-        foreach ($adminRecipients as $admin) {
+        foreach ($presentAdminRecipients as $admin) {
             $this->actions->executeTemplates(
                 $this->config->onMetricsActions,
                 array_merge($context, ['admin' => $admin])
             );
         }
+    }
+
+    /**
+     * @param array<int, string> $adminRecipients
+     * @param array<int, string> $knownPresentRecipients
+     * @return array<int, string>
+     */
+    private function filterPresentAdminRecipients(array $adminRecipients, array $knownPresentRecipients): array
+    {
+        $presentAdminIds = [];
+        foreach (array_keys($this->onlinePlayers) as $playerId) {
+            $normalized = strtolower(trim($playerId));
+            if ($normalized !== '') {
+                $presentAdminIds[$normalized] = true;
+            }
+        }
+
+        foreach ($knownPresentRecipients as $recipient) {
+            $normalized = strtolower(trim($recipient));
+            if ($normalized !== '') {
+                $presentAdminIds[$normalized] = true;
+            }
+        }
+
+        $presentRecipients = [];
+        foreach ($adminRecipients as $admin) {
+            $normalized = strtolower(trim($admin));
+            if ($normalized === '' || !isset($presentAdminIds[$normalized])) {
+                continue;
+            }
+
+            $presentRecipients[] = $admin;
+        }
+
+        return $presentRecipients;
     }
 
     /** @return array<string, string> */

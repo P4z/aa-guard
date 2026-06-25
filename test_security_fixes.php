@@ -759,6 +759,45 @@ $unknownRemoteGuard = $buildGuardForRemoteCommandTest(['internal_admin'], $unkno
 $unknownRemoteGuard->handleLogLine('INVALID_COMMAND guard internal_admin 8.8.8.8 2 status');
 $test->assertEquals(0, count($unknownRemoteCommands), 'Unknown remote guard subcommand is ignored silently');
 
+$presentAdminMetrics = new Metrics();
+$presentAdminCommands = [];
+$presentAdminGuard = $buildGuardForRemoteCommandTest(['admin_online', 'admin_offline'], $presentAdminCommands, $presentAdminMetrics);
+$presentAdminReflection = new ReflectionClass($presentAdminGuard);
+$presentOnlinePlayersProperty = $presentAdminReflection->getProperty('onlinePlayers');
+$presentOnlinePlayersProperty->setAccessible(true);
+$presentOnlinePlayersProperty->setValue($presentAdminGuard, [
+    'admin_online' => [
+        'player_id' => 'admin_online',
+        'player_name' => 'Admin Online',
+        'player_ip' => '8.8.8.8',
+        'player_country' => 'United States',
+        'player_network' => 'Example ISP',
+    ],
+    'regular_user' => [
+        'player_id' => 'regular_user',
+        'player_name' => 'Regular User',
+        'player_ip' => '9.9.9.9',
+        'player_country' => 'United States',
+        'player_network' => 'Another ISP',
+    ],
+]);
+
+$presentAdminGuard->reportMetrics();
+$test->assertEquals(1, count($presentAdminCommands), 'Periodic metrics emit only to present admins');
+$test->assertContains('PLAYER_MESSAGE admin_online', $presentAdminCommands[0] ?? '', 'Periodic metrics target present admin');
+$test->assertNotContains('admin_offline', $presentAdminCommands[0] ?? '', 'Periodic metrics skip absent admin');
+
+$absentAdminMetrics = new Metrics();
+$absentAdminCommands = [];
+$absentAdminGuard = $buildGuardForRemoteCommandTest(['admin_offline'], $absentAdminCommands, $absentAdminMetrics);
+$absentAdminReflection = new ReflectionClass($absentAdminGuard);
+$absentOnlinePlayersProperty = $absentAdminReflection->getProperty('onlinePlayers');
+$absentOnlinePlayersProperty->setAccessible(true);
+$absentOnlinePlayersProperty->setValue($absentAdminGuard, []);
+
+$absentAdminGuard->reportMetrics();
+$test->assertEquals(0, count($absentAdminCommands), 'Periodic metrics emit nothing when no admin is present');
+
 $playersMetrics = new Metrics();
 $playersCommands = [];
 $playersGuard = $buildGuardForRemoteCommandTest(['internal_admin'], $playersCommands, $playersMetrics);
@@ -781,14 +820,14 @@ $playersGuard->handleLogLine('INVALID_COMMAND guard internal_admin 8.8.8.8 2 pla
 
 $playerListCommands = array_values(array_filter(
     $playersCommands,
-    static fn (string $command): bool => str_contains($command, 'player_id=0xffff00player_1')
+    static fn (string $command): bool => str_contains($command, 'id=0xffff00player_1')
 ));
 
 $test->assertEquals(1, count($playerListCommands), 'Remote players command emits one line per tracked player');
 $test->assertContains('PLAYER_MESSAGE internal_admin', $playerListCommands[0] ?? '', 'Remote players response targets requester only');
-$test->assertContains('player_name=0xffff00Player One', $playerListCommands[0] ?? '', 'Remote players response includes player_name');
-$test->assertContains('player_country=0xffff00United States', $playerListCommands[0] ?? '', 'Remote players response includes player_country');
-$test->assertContains('player_network=0xffff00Example ISP', $playerListCommands[0] ?? '', 'Remote players response includes player_network');
+$test->assertContains('name=0xffff00Player One', $playerListCommands[0] ?? '', 'Remote players response includes player_name');
+$test->assertContains('country=0xffff00United States', $playerListCommands[0] ?? '', 'Remote players response includes player_country');
+$test->assertContains('network=0xffff00Example ISP', $playerListCommands[0] ?? '', 'Remote players response includes player_network');
 
 $playersCommands = [];
 $playersGuard->handleLogLine('PLAYER_LEFT player_1 8.8.8.8 Player One');
@@ -804,13 +843,13 @@ $playersGuard->handleLogLine('INVALID_COMMAND guard internal_admin 8.8.8.8 2 pla
 
 $renamedPlayerListCommands = array_values(array_filter(
     $playersCommands,
-    static fn (string $command): bool => str_contains($command, 'player_id=0xffff00')
+    static fn (string $command): bool => str_contains($command, 'id=0xffff00')
 ));
 
 $test->assertEquals(1, count($renamedPlayerListCommands), 'Remote players command emits one list row for renamed player');
-$test->assertContains('player_id=0xffff00vanbozo@rcl', $renamedPlayerListCommands[0] ?? '', 'Remote players response uses renamed player id');
-$test->assertContains('player_name=0xffff00vanbozo', $renamedPlayerListCommands[0] ?? '', 'Remote players response keeps screen name after rename');
-$test->assertNotContains('player_id=0xffff00vanbozo 0xffffff', $renamedPlayerListCommands[0] ?? '', 'Remote players response does not include old player id after rename');
+$test->assertContains('id=0xffff00vanbozo@rcl', $renamedPlayerListCommands[0] ?? '', 'Remote players response uses renamed player id');
+$test->assertContains('name=0xffff00vanbozo', $renamedPlayerListCommands[0] ?? '', 'Remote players response keeps screen name after rename');
+$test->assertNotContains('id=0xffff00vanbozo 0xffffff', $renamedPlayerListCommands[0] ?? '', 'Remote players response does not include old player id after rename');
 
 // Test spectator and grid players together using fresh Guard instance
 $spectatorMetrics = new Metrics();
@@ -842,12 +881,12 @@ $spectatorGuard->handleLogLine('INVALID_COMMAND guard internal_admin 8.8.8.8 2 p
 
 $playerListRows = array_values(array_filter(
     $spectatorCommands,
-    static fn (string $command): bool => str_contains($command, 'player_id=0xffff00')
+    static fn (string $command): bool => str_contains($command, 'id=0xffff00')
 ));
 
 $test->assertEquals(2, count($playerListRows), 'Remote players command lists both grid and spectator entries');
-$test->assertContains('player_id=0xffff00player_grid', $playerListRows[0] ?? '', 'Remote players response includes grid player');
-$test->assertContains('player_id=0xffff00spectator_one', $playerListRows[1] ?? '', 'Remote players response includes spectator');
+$test->assertContains('id=0xffff00player_grid', $playerListRows[0] ?? '', 'Remote players response includes grid player');
+$test->assertContains('id=0xffff00spectator_one', $playerListRows[1] ?? '', 'Remote players response includes spectator');
 $test->assertContains('Player Grid', $playerListRows[0] ?? '', 'Remote players response includes grid player display name');
 $test->assertContains('Spectator One', $playerListRows[1] ?? '', 'Remote players response includes spectator display name');
 
