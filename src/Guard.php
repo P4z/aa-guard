@@ -698,7 +698,7 @@ final class Guard
 
         foreach ($players as $player) {
             $this->actions->executeTemplatesWithRawValues([
-                'PLAYER_MESSAGE {{admin}} "0x00ff00>> 0x888888[GUARD] 0xffffff player_id=0xffff00{{player_id}} 0xffffffplayer_name=0xffff00{{player_name}} 0xffffffplayer_country=0xffff00{{player_country}} 0xffffffplayer_network=0xffff00{{player_network}}"',
+                'PLAYER_MESSAGE {{admin}} "0x00ff00>> 0x888888[GUARD] 0xffffffid=0xffff00{{player_id}} 0xffffffname=0xffff00{{player_name}} 0xffffffcountry=0xffff00{{player_country}} 0xffffffnetwork=0xffff00{{player_network}}"',
             ], [
                 'admin' => $admin,
                 'player_id' => $player['player_id'],
