@@ -11,6 +11,6 @@
   "dedupeWindowSeconds": 15,
   "ipInfoTimeoutSeconds": 2,
   "ipInfoRateLimitPerMinute": 30,
-  "metricsIntervalSeconds": 300,
+  "metricsIntervalSeconds": 900,
   "debug": false
 }
