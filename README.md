@@ -103,7 +103,7 @@ Authorization rules:
 - users listed in `admins`
 - moderators/admins with `player_level >= 2` (`player_level` is the ladderlog-reported server permission level)
 
-Unauthorized or unknown remote commands are silently ignored for now.
+Unauthorized commands, unknown subcommands, and a bare `/guard` all trigger a private reply built from `actions.onErrorMessage` + `actions.onError` (see [Templates and Placeholders](#templates-and-placeholders)). If either is left empty, these cases are silently ignored, matching the previous behaviour.
 
 ## Configuration
 
@@ -139,6 +139,8 @@ Legacy single-file configuration remains supported if a JSON file path is provid
 | `onConnect` | array | Yes | Action templates for each player join (may reference `{{msg}}`) |
 | `onMatch` | array | Yes | Action templates when a network matches a rule |
 | `onMetrics` | array | No | Metrics report templates (emitted periodically or on `SIGUSR1`) |
+| `onErrorMessage` | array | No | Pool of flavor-quote strings; one is picked at random per unhandled `/guard` invocation |
+| `onError` | array | No | Action templates delivering the picked `onErrorMessage` quote (may reference `{{msg}}`, `{{player_id}}`) |
 
 ### `rules.json` Structure
 
@@ -215,6 +217,20 @@ For periodic and `SIGUSR1` reports, templates are emitted only to admins current
 - `{{runtime}}` – Formatted runtime duration
 
 `last_action_who` and `last_action_why` are available before `runtime` in the default metrics template.
+
+### `actions.onErrorMessage` / `actions.onError`
+
+Sent privately to the requester when a `/guard` invocation is unhandled: no subcommand given, an unknown subcommand, or the requester is not authorized.
+
+`onErrorMessage` is a pool of quote strings; one is chosen at random per event and rendered into the `{{msg}}` placeholder for `onError` templates.
+
+**Available placeholders:**
+- `{{msg}}` – Randomly chosen quote (from `onErrorMessage`)
+- `{{player_id}}` – Identifier of the player who issued the command
+
+**Behaviour:**
+- Always targets only the requester (never broadcast to admins).
+- No-op if `onErrorMessage` or `onError` is empty (matches pre-existing silent behaviour).
 
 ### `/guard players` Response Format
 

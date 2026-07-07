@@ -345,12 +345,14 @@ final class Guard
     {
         $subcommand = $this->parseRemoteSubcommand($event['commandArgs']);
         if ($subcommand === null) {
+            $this->replyWithRandomErrorQuote($event['playerId']);
             return;
         }
 
         switch ($subcommand['name']) {
             case 'metrics':
                 if (!$this->isRemoteCommandAuthorized($event['playerId'], $event['playerLevel'])) {
+                    $this->replyWithRandomErrorQuote($event['playerId']);
                     return;
                 }
 
@@ -358,6 +360,7 @@ final class Guard
                 break;
             case 'players':
                 if (!$this->isRemoteCommandAuthorized($event['playerId'], $event['playerLevel'])) {
+                    $this->replyWithRandomErrorQuote($event['playerId']);
                     return;
                 }
 
@@ -365,12 +368,37 @@ final class Guard
                 break;
             case 'reload':
                 if (!$this->isRemoteCommandAuthorized($event['playerId'], $event['playerLevel'])) {
+                    $this->replyWithRandomErrorQuote($event['playerId']);
                     return;
                 }
 
                 $this->handleReloadCommand($event['playerId']);
                 break;
+            default:
+                $this->replyWithRandomErrorQuote($event['playerId']);
+                break;
         }
+    }
+
+    /**
+     * Replies in private to an unhandled/unauthorized `/guard` invocation
+     * (no subcommand, unknown subcommand, or not authorized) with a random
+     * flavor quote from config (`onErrorMessage`), delivered via the
+     * configurable `onError` action templates. No-op if either is empty.
+     */
+    private function replyWithRandomErrorQuote(string $playerId): void
+    {
+        if (empty($this->config->onErrorQuotes) || empty($this->config->onErrorActions)) {
+            return;
+        }
+
+        $quote = $this->config->onErrorQuotes[array_rand($this->config->onErrorQuotes)];
+
+        $this->actions->executeTemplatesWithRawValues(
+            $this->config->onErrorActions,
+            ['player_id' => $playerId, 'msg' => $quote],
+            ['msg']
+        );
     }
 
     /**

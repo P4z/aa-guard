@@ -752,6 +752,8 @@ $buildGuardForRemoteCommandTest = function (array $adminRecipients, array &$emit
             cacheTtlSeconds:     60,
             dedupeWindowSeconds: 15,
             onMetricsActions:    ['PLAYER_MESSAGE {{admin}} "bans={{bans}} lookups={{lookups}} cacheSize={{cache_size}} invalidIps={{invalid_ips}} runtime={{runtime}}"'],
+            onErrorQuotes:       ['TEST_ERROR_QUOTE'],
+            onErrorActions:      ['PLAYER_MESSAGE {{player_id}} "{{msg}}"'],
         ),
         $metrics
     );
@@ -831,13 +833,76 @@ $unauthorizedMetrics = new Metrics();
 $unauthorizedCommands = [];
 $unauthorizedGuard = $buildGuardForRemoteCommandTest(['internal_admin'], $unauthorizedCommands, $unauthorizedMetrics);
 $unauthorizedGuard->handleLogLine('INVALID_COMMAND guard regular_user 8.8.8.8 1 metrics');
-$test->assertEquals(0, count($unauthorizedCommands), 'Unauthorized remote metrics request is ignored silently');
+$test->assertEquals(1, count($unauthorizedCommands), 'Unauthorized remote metrics request gets a private onError reply');
+$test->assertContains('PLAYER_MESSAGE regular_user', $unauthorizedCommands[0] ?? '', 'Unauthorized onError reply targets the requester');
+$test->assertContains('TEST_ERROR_QUOTE', $unauthorizedCommands[0] ?? '', 'Unauthorized onError reply includes configured quote');
 
 $unknownRemoteMetrics = new Metrics();
 $unknownRemoteCommands = [];
 $unknownRemoteGuard = $buildGuardForRemoteCommandTest(['internal_admin'], $unknownRemoteCommands, $unknownRemoteMetrics);
 $unknownRemoteGuard->handleLogLine('INVALID_COMMAND guard internal_admin 8.8.8.8 2 status');
-$test->assertEquals(0, count($unknownRemoteCommands), 'Unknown remote guard subcommand is ignored silently');
+$test->assertEquals(1, count($unknownRemoteCommands), 'Unknown remote guard subcommand gets a private onError reply');
+$test->assertContains('PLAYER_MESSAGE internal_admin', $unknownRemoteCommands[0] ?? '', 'Unknown-subcommand onError reply targets the requester');
+$test->assertContains('TEST_ERROR_QUOTE', $unknownRemoteCommands[0] ?? '', 'Unknown-subcommand onError reply includes configured quote');
+
+$bareGuardMetrics = new Metrics();
+$bareGuardCommands = [];
+$bareGuardGuard = $buildGuardForRemoteCommandTest(['internal_admin'], $bareGuardCommands, $bareGuardMetrics);
+$bareGuardGuard->handleLogLine('INVALID_COMMAND guard internal_admin 8.8.8.8 2');
+$test->assertEquals(1, count($bareGuardCommands), 'Bare /guard with no subcommand gets a private onError reply');
+$test->assertContains('PLAYER_MESSAGE internal_admin', $bareGuardCommands[0] ?? '', 'Bare /guard onError reply targets the requester');
+$test->assertContains('TEST_ERROR_QUOTE', $bareGuardCommands[0] ?? '', 'Bare /guard onError reply includes configured quote');
+
+$noQuotesConfigured = [];
+$noQuotesMetrics = new Metrics();
+$noQuotesActionRegistry = new ActionRegistry(function (string $command) use (&$noQuotesConfigured): void {
+    $noQuotesConfigured[] = $command;
+});
+$noQuotesGuard = new Guard(
+    new IpInfoClient('https://ipinfo.io', null, 2, 0, $noQuotesMetrics),
+    new Matcher([]),
+    $noQuotesActionRegistry,
+    new Logger(),
+    new GuardConfig(
+        adminRecipients:     ['internal_admin'],
+        onConnectMessageTemplate: '{{player_id}} joined from {{country_name}}',
+        onConnectActions:    [],
+        onMatchActions:      [],
+        retryDelaysMs:       [100],
+        maxAttempts:         1,
+        cacheTtlSeconds:     60,
+        dedupeWindowSeconds: 15,
+    ),
+    $noQuotesMetrics
+);
+$noQuotesGuard->handleLogLine('INVALID_COMMAND guard internal_admin 8.8.8.8 2 status');
+$test->assertEquals(0, count($noQuotesConfigured), 'Unknown subcommand stays silent when onError is unconfigured');
+
+$quotesOnlyConfigured = [];
+$quotesOnlyMetrics = new Metrics();
+$quotesOnlyActionRegistry = new ActionRegistry(function (string $command) use (&$quotesOnlyConfigured): void {
+    $quotesOnlyConfigured[] = $command;
+});
+$quotesOnlyGuard = new Guard(
+    new IpInfoClient('https://ipinfo.io', null, 2, 0, $quotesOnlyMetrics),
+    new Matcher([]),
+    $quotesOnlyActionRegistry,
+    new Logger(),
+    new GuardConfig(
+        adminRecipients:     ['internal_admin'],
+        onConnectMessageTemplate: '{{player_id}} joined from {{country_name}}',
+        onConnectActions:    [],
+        onMatchActions:      [],
+        retryDelaysMs:       [100],
+        maxAttempts:         1,
+        cacheTtlSeconds:     60,
+        dedupeWindowSeconds: 15,
+        onErrorQuotes:       ['TEST_ERROR_QUOTE'],
+    ),
+    $quotesOnlyMetrics
+);
+$quotesOnlyGuard->handleLogLine('INVALID_COMMAND guard internal_admin 8.8.8.8 2 status');
+$test->assertEquals(0, count($quotesOnlyConfigured), 'Unknown subcommand stays silent when onErrorMessage is configured but onError actions are not');
 
 $presentAdminMetrics = new Metrics();
 $presentAdminCommands = [];

@@ -244,6 +244,14 @@ function loadConfig(string $configPath): array
         ? $decoded['actions']['onMetrics']
         : [];
 
+    $decoded['actions']['onErrorMessage'] = isset($decoded['actions']['onErrorMessage']) && is_array($decoded['actions']['onErrorMessage'])
+        ? $decoded['actions']['onErrorMessage']
+        : [];
+
+    $decoded['actions']['onError'] = isset($decoded['actions']['onError']) && is_array($decoded['actions']['onError'])
+        ? $decoded['actions']['onError']
+        : [];
+
     return $decoded;
 }
 
@@ -296,5 +304,7 @@ function buildGuardConfig(array $config): GuardConfig
         onMetricsActions:    $config['actions']['onMetrics'],
         metricsIntervalSeconds: $config['metricsIntervalSeconds'],
         debug:               $config['debug'],
+        onErrorQuotes:       $config['actions']['onErrorMessage'],
+        onErrorActions:      $config['actions']['onError'],
     );
 }

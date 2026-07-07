@@ -21,5 +21,20 @@
   ],
   "onMetrics": [
     "PLAYER_MESSAGE {{admin}} \"0x00ff00>> 0x888888[GUARD] 0xffffffbans=0xffff00{{bans}} 0xfffffflookups=0xffff00{{lookups}} 0xffffffcacheHits=0xffff00{{cache_hits}} 0xffffffcacheSize=0xffff00{{cache_size}} 0xffffffapiErrors=0xffff00{{api_errors}} 0xffffffrateLimited=0xffff00{{rate_limited}} 0xffffffinvalidIps=0xffff00{{invalid_ips}} 0xfffffflastActionWho=0xffff00{{last_action_who}} 0xfffffflastActionWhy=0xffff00{{last_action_why}} 0xffffffruntime=0xffff00{{runtime}}\""
+  ],
+  "onErrorMessage": [
+    "Don't be daft, Sergeant. No one ever saw a thousand-to-one chance come up. - Carrot",
+    "What if it's just a thousand-to-one chance? - Colon",
+    "Anyone ever heard of a thousand-to-one shot coming up? - Colon",
+    "Million-to-one chances always crop up. Well-known fact. - Vimes",
+    "All by himself? - Vimes",
+    "You have the right to remain silent. You have the right to be summarily thrown into a piranha tank. - Vimes",
+    "'E's fighting in there! - Nobby",
+    "Disgusting, this sort of thing, really. - Colon",
+    "I do not mind if I do, not-Sgt. Colon. - Nobby",
+    "Dunno. Ask me again in five hundred years. - Colon"
+  ],
+  "onError": [
+    "PLAYER_MESSAGE {{player_id}} \"0xff0000>> 0x888888[GUARD] 0xffffff{{msg}}\""
   ]
 }
