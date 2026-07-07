@@ -36,7 +36,7 @@ final class IpInfoClient
     }
 
     /**
-     * @return array{success:bool, networkName:?string, country:?string, countryCode:?string, countryName:?string, error:?string}
+     * @return array{success:bool, networkName:?string, country:?string, countryCode:?string, countryName:?string, timezone:?string, error:?string}
      */
     public function fetchNetworkName(string $ip): array
     {
@@ -47,6 +47,7 @@ final class IpInfoClient
                 'country' => null,
                 'countryCode' => null,
                 'countryName' => null,
+                'timezone' => null,
                 'error' => 'invalid_ip',
             ];
         }
@@ -58,6 +59,7 @@ final class IpInfoClient
                 'country' => null,
                 'countryCode' => null,
                 'countryName' => null,
+                'timezone' => null,
                 'error' => 'private_ip',
             ];
         }
@@ -76,6 +78,7 @@ final class IpInfoClient
                 'country'     => null,
                 'countryCode' => null,
                 'countryName' => null,
+                'timezone'    => null,
                 'error'       => 'rate_limited',
             ];
         }
@@ -111,6 +114,7 @@ final class IpInfoClient
                 'country' => null,
                 'countryCode' => null,
                 'countryName' => null,
+                'timezone' => null,
                 'error' => 'request_failed',
             ];
         }
@@ -126,6 +130,7 @@ final class IpInfoClient
                 'country' => null,
                 'countryCode' => null,
                 'countryName' => null,
+                'timezone' => null,
                 'error' => 'http_' . $statusCode,
             ];
         }
@@ -141,6 +146,7 @@ final class IpInfoClient
                 'country' => null,
                 'countryCode' => null,
                 'countryName' => null,
+                'timezone' => null,
                 'error' => 'invalid_json',
             ];
         }
@@ -156,6 +162,7 @@ final class IpInfoClient
                 'country' => null,
                 'countryCode' => null,
                 'countryName' => null,
+                'timezone' => null,
                 'error' => 'missing_network_name',
             ];
         }
@@ -163,6 +170,7 @@ final class IpInfoClient
         $countryCode = $this->extractCountryCode($decoded);
         $countryName = $this->extractCountryName($decoded);
         $country = $countryName ?? $countryCode;
+        $timezone = $this->extractTimezone($decoded);
 
         return [
             'success' => true,
@@ -170,6 +178,7 @@ final class IpInfoClient
             'country' => $country,
             'countryCode' => $countryCode,
             'countryName' => $countryName,
+            'timezone' => $timezone,
             'error' => null,
         ];
     }
@@ -324,5 +333,14 @@ final class IpInfoClient
     {
         $countryCode = isset($payload['country']) && is_string($payload['country']) ? trim($payload['country']) : '';
         return $countryCode !== '' ? $countryCode : null;
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     */
+    private function extractTimezone(array $payload): ?string
+    {
+        $timezone = isset($payload['timezone']) && is_string($payload['timezone']) ? trim($payload['timezone']) : '';
+        return $timezone !== '' ? $timezone : null;
     }
 }

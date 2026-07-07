@@ -10,7 +10,7 @@
   "onDebug": [
     "PLAYER_MESSAGE {{admin}} \"0x00ff00>> 0x888888[GUARD] 0xffff00[{{level}}] {{msg}}\""
   ],
-  "onConnectMessage": "0xffff00{{player_id}} 0xffffffis connecting from 0xffff00{{country_name}} 0xffffff(0xffff00{{country_code}}0xffffff), network: 0xffff00{{network_name}}0xffffff.",
+  "onConnectMessage": "0xffff00{{player_id}} 0xffffffis connecting from 0xffff00{{country_name}} 0xffffff(0xffff00{{country_code}}0xffffff), network: 0xffff00{{network_name}}0xffffff, time=0xffff00{{time}}0xffffff.",
   "onConnect": [
     "# CONSOLE_MESSAGE 0xff0000>> 0x888888[GUARD] 0xffff00{{player_id}} 0xffffffis connecting from 0xffff00{{country_name}} 0xffffff(0xffff00{{country_code}}0xffffff).",
     "PLAYER_MESSAGE {{admin}} \"0x00ff00>> 0x888888[GUARD] 0xffffff{{msg}}\""

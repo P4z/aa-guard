@@ -15,7 +15,7 @@ Player joins → Guard reads event → Guard queries IP at ipinfo.io → Guard r
 - **Clean output**: Writes commands to `STDOUT` and flushes immediately; logs to `STDERR` with severity (`DEBUG`, `WARN`, `ERROR`).
 - **Event handling**: Processes `PLAYER_ENTERED_GRID`, `PLAYER_ENTERED_SPECTATOR`, `PLAYER_RENAMED`, `PLAYER_LEFT`, and `INVALID_COMMAND` ladderlog events, including arguments containing spaces.
 - **IP validation**: Validates IPv4 format before processing; rejects private and reserved ranges.
-- **GeoIP lookup**: Queries ipinfo.io for network name, country code, and country name; supports Bearer token authentication.
+- **GeoIP lookup**: Queries ipinfo.io for network name, country code, country name, and IANA timezone; supports Bearer token authentication.
 - **Intelligent caching**: In-memory IP cache (`cacheTtlSeconds`) minimises redundant API calls.
 - **Rate limiting**: Local per-minute rate limiting for API calls; respects ipinfo.io backoff signals.
 - **Retry mechanism**: Configurable retry queue with custom delays (`retry.delaysMs`) for resilience under load.
@@ -156,9 +156,10 @@ Rendered before `onConnect` templates; generates the `{{msg}}` placeholder.
 - `{{country_name}}` – Full country name
 - `{{country_code}}` – ISO 3166-1 alpha-2 code
 - `{{network_name}}` – ASN name from ipinfo.io
+- `{{time}}` – Player's local time (`HH:MM`), derived from the IANA timezone reported by ipinfo.io for their IP; `unknown` if the timezone is unavailable or invalid
 
 **Example:**  
-`"{{player_id}} is connecting from {{country_name}} ({{country_code}}), network: {{network_name}}."`
+`"{{player_id}} is connecting from {{country_name}} ({{country_code}}), network: {{network_name}}, time={{time}}."`
 
 ### `actions.onConnect`
 
@@ -170,6 +171,7 @@ Executed for each player join.
 - `{{country_name}}` – Country name (full)
 - `{{country_code}}` – Country code (ISO 3166-1 alpha-2)
 - `{{network_name}}` – Network/ASN name
+- `{{time}}` – Player's local time (`HH:MM`), derived from the IANA timezone reported by ipinfo.io for their IP; `unknown` if the timezone is unavailable or invalid
 - `{{admin}}` – Admin username (only in admin-targeted templates)
 
 **Behaviour:**
@@ -222,6 +224,7 @@ Fields per line:
 - `player_name`
 - `player_country`
 - `player_network`
+- `time` – Player's local time (`HH:MM`), derived from the IANA timezone reported by ipinfo.io for their IP at join time; `unknown` if the timezone is unavailable or invalid
 
 If no players are tracked, guard replies with `No tracked players online.`
 
@@ -245,7 +248,7 @@ Placeholders are optional; typically static commands.
     "onDebug": [
       "PLAYER_MESSAGE {{admin}} \"0xff0000>> 0x888888[GUARD] 0xffffff [{{level}}] {{msg}}\""
     ],
-    "onConnectMessage": "{{player_id}} is connecting from {{country_name}} ({{country_code}}), network: {{network_name}}.",
+    "onConnectMessage": "{{player_id}} is connecting from {{country_name}} ({{country_code}}), network: {{network_name}}, time={{time}}.",
     "onConnect": [
       "# CONSOLE_MESSAGE 0xff0000>> 0x888888[GUARD] 0xffffff{{player_id}} is connecting from {{country_name}} ({{country_code}}).",
       "PLAYER_MESSAGE {{admin}} \"0xff0000>> 0x888888[GUARD] 0xffffff {{msg}}\""
@@ -284,8 +287,10 @@ Placeholders are optional; typically static commands.
 ## Default Join Message Format
 
 ```
-<player_id> is connecting from <country_name> (<country_code>), network: <network_name>.
+<player_id> is connecting from <country_name> (<country_code>), network: <network_name>, time=<HH:MM>.
 ```
+
+`<HH:MM>` reflects the player's own local time (from their IP's IANA timezone via ipinfo.io). If the timezone can't be determined, `<HH:MM>` is `unknown` — the guard never substitutes its own server clock.
 
 ## Expected Ladderlog Format
 
@@ -307,7 +312,8 @@ INVALID_COMMAND guard admin_1 192.168.51.42 2 players
 - Deduplication is keyed on `playerId|ruleName` to prevent repeated enforcement.
 - Startup actions enable `LADDERLOG_WRITE_PLAYER_ENTERED_GRID 1`, `LADDERLOG_WRITE_PLAYER_ENTERED_SPECTATOR 1`, `LADDERLOG_WRITE_PLAYER_RENAMED 1`, `LADDERLOG_WRITE_PLAYER_LEFT 1`, and `LADDERLOG_WRITE_INVALID_COMMAND 1` in the default configuration.
 - Remote `/guard metrics` and `/guard players` requests are authorized for configured admins and users with level `2` or higher, and replies are sent only to the requester.
-- Online players are tracked by join/rename/leave events and exposed through `/guard players` with fields: `player_id`, `player_name`, `player_country`, `player_network`.
+- Online players are tracked by join/rename/leave events and exposed through `/guard players` with fields: `player_id`, `player_name`, `player_country`, `player_network`, `time` (player's own local time `HH:MM`, from ipinfo.io timezone data, or `unknown`).
+- `{{time}}` reflects each player's own local time, computed from the IANA timezone (e.g. `Europe/Warsaw`) that ipinfo.io reports for their IP. If the timezone is missing or invalid, `{{time}}` is `unknown` — it never falls back to the guard process's own server clock. Available in `onConnectMessage`, `onConnect`, and the `/guard players` report.
 - Metrics include last enforcement details via `last_action_who` and `last_action_why` before `runtime`.
 - No external package managers or dependencies are required, PHP standard library only.
 - **Retry mechanism:** Triggered by lookup failures or rate limits. Configured delays (`retry.delaysMs`) apply to lookup retries; rate limiting respects ipinfo.io's backoff signals instead.

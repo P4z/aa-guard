@@ -16,7 +16,7 @@ final class Guard
     private GuardConfig $config;
     private Metrics $metrics;
 
-    /** @var array<string, array{networkName:string, country:string, countryCode:string, countryName:string, expiresAt:float}> */
+    /** @var array<string, array{networkName:string, country:string, countryCode:string, countryName:string, timezone:?string, expiresAt:float}> */
     private array $ipCache = [];
 
     /** @var array<string, array{playerId:string, ip:string, displayName:string, attempts:int, nextAttemptAt:float}> */
@@ -25,7 +25,7 @@ final class Guard
     /** @var array<string, float> */
     private array $recentActions = [];
 
-    /** @var array<string, array{player_id:string, player_name:string, player_ip:string, player_country:string, player_network:string}> */
+    /** @var array<string, array{player_id:string, player_name:string, player_ip:string, player_country:string, player_network:string, player_timezone:?string}> */
     private array $onlinePlayers = [];
 
     private float $nextHousekeepingAt = 0.0;
@@ -401,6 +401,7 @@ final class Guard
         $countryName = 'unknown';
         $countryCode = 'unknown';
         $networkName = 'unknown';
+        $timezone = null;
 
         if ($lookup !== null) {
             if (isset($lookup['countryName']) && is_string($lookup['countryName']) && trim($lookup['countryName']) !== '') {
@@ -414,13 +415,17 @@ final class Guard
             if (isset($lookup['networkName']) && is_string($lookup['networkName']) && trim($lookup['networkName']) !== '') {
                 $networkName = trim($lookup['networkName']);
             }
+
+            if (isset($lookup['timezone']) && is_string($lookup['timezone']) && trim($lookup['timezone']) !== '') {
+                $timezone = trim($lookup['timezone']);
+            }
         }
 
         $country = $countryName !== 'unknown' ? $countryName : $countryCode;
-        $this->recordOnlinePlayer($playerId, $displayName, $ip, $country, $networkName);
+        $this->recordOnlinePlayer($playerId, $displayName, $ip, $country, $networkName, $timezone);
 
         if ($attempt === 0) {
-            $this->emitConnectionNote($playerId, $countryCode, $countryName, $networkName);
+            $this->emitConnectionNote($playerId, $countryCode, $countryName, $networkName, $timezone);
         }
 
         if ($lookup === null) {
@@ -469,7 +474,8 @@ final class Guard
         string $playerName,
         string $ip,
         string $country,
-        string $networkName
+        string $networkName,
+        ?string $timezone = null
     ): void {
         $this->onlinePlayers[$playerId] = [
             'player_id' => $playerId,
@@ -477,6 +483,7 @@ final class Guard
             'player_ip' => $ip,
             'player_country' => $country,
             'player_network' => $networkName,
+            'player_timezone' => $timezone,
         ];
     }
 
@@ -529,7 +536,7 @@ final class Guard
     }
 
     /**
-     * @return array{networkName:string, country:string, countryCode:string, countryName:string}|null
+     * @return array{networkName:string, country:string, countryCode:string, countryName:string, timezone:?string}|null
      */
     private function getLookupData(string $ip): ?array
     {
@@ -542,6 +549,7 @@ final class Guard
                 'country' => $this->ipCache[$ip]['country'],
                 'countryCode' => $this->ipCache[$ip]['countryCode'],
                 'countryName' => $this->ipCache[$ip]['countryName'],
+                'timezone' => $this->ipCache[$ip]['timezone'] ?? null,
             ];
         }
 
@@ -561,12 +569,16 @@ final class Guard
         $countryName = isset($result['countryName']) && is_string($result['countryName']) && trim($result['countryName']) !== ''
             ? trim($result['countryName'])
             : 'unknown';
+        $timezone = isset($result['timezone']) && is_string($result['timezone']) && trim($result['timezone']) !== ''
+            ? trim($result['timezone'])
+            : null;
 
         $this->ipCache[$ip] = [
             'networkName' => $result['networkName'],
             'country' => $country,
             'countryCode' => $countryCode,
             'countryName' => $countryName,
+            'timezone' => $timezone,
             'expiresAt' => $now + $this->config->cacheTtlSeconds,
         ];
 
@@ -575,10 +587,11 @@ final class Guard
             'country' => $country,
             'countryCode' => $countryCode,
             'countryName' => $countryName,
+            'timezone' => $timezone,
         ];
     }
 
-    private function emitConnectionNote(string $playerId, string $countryCode, string $countryName, string $networkName): void
+    private function emitConnectionNote(string $playerId, string $countryCode, string $countryName, string $networkName, ?string $timezone = null): void
     {
         $country = $countryName !== 'unknown' ? $countryName : $countryCode;
 
@@ -588,6 +601,7 @@ final class Guard
             'country_code' => $countryCode,
             'country_name' => $countryName,
             'network_name' => $networkName,
+            'time'         => $this->localTimeForTimezone($timezone),
         ];
         $baseContext['msg'] = $this->renderOnConnectMessage($baseContext);
         $emittedAdminMessage = false;
@@ -698,15 +712,29 @@ final class Guard
 
         foreach ($players as $player) {
             $this->actions->executeTemplatesWithRawValues([
-                'PLAYER_MESSAGE {{admin}} "0x00ff00>> 0x888888[GUARD] 0xffffffid=0xffff00{{player_id}} 0xffffffname=0xffff00{{player_name}} 0xffffffcountry=0xffff00{{player_country}} 0xffffffnetwork=0xffff00{{player_network}}"',
+                'PLAYER_MESSAGE {{admin}} "0x00ff00>> 0x888888[GUARD] 0xffffffid=0xffff00{{player_id}} 0xffffffname=0xffff00{{player_name}} 0xffffffcountry=0xffff00{{player_country}} 0xffffffnetwork=0xffff00{{player_network}} 0xfffffftime=0xffff00{{time}}"',
             ], [
                 'admin' => $admin,
                 'player_id' => $player['player_id'],
                 'player_name' => $player['player_name'],
                 'player_country' => $player['player_country'],
                 'player_network' => $player['player_network'],
+                'time' => $this->localTimeForTimezone($player['player_timezone'] ?? null),
             ], []);
         }
+    }
+
+    private function localTimeForTimezone(?string $timezone): string
+    {
+        if ($timezone !== null && $timezone !== '') {
+            try {
+                return (new \DateTimeImmutable('now', new \DateTimeZone($timezone)))->format('H:i');
+            } catch (\Exception $e) {
+                // Invalid/unknown IANA timezone name from provider.
+            }
+        }
+
+        return 'unknown';
     }
 
     /**

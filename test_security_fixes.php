@@ -250,6 +250,21 @@ $test->assertEquals('player_1', $result['playerId'] ?? null, "Extracts player ID
 $test->assertEquals('8.8.8.8', $result['ip'] ?? null, "Extracts IP");
 $test->assertEquals('Player One', $result['displayName'] ?? null, "Extracts display name");
 
+// localTimeForTimezone(): valid IANA timezone computes real local time for that zone
+$localTimeForTimezoneMethod = $reflection->getMethod('localTimeForTimezone');
+$localTimeForTimezoneMethod->setAccessible(true);
+$tokyoTime = $localTimeForTimezoneMethod->invoke($guard, 'Asia/Tokyo');
+$expectedTokyoTime = (new DateTimeImmutable('now', new DateTimeZone('Asia/Tokyo')))->format('H:i');
+$test->assertEquals($expectedTokyoTime, $tokyoTime, "localTimeForTimezone() computes real local time for a valid IANA timezone");
+
+// localTimeForTimezone(): invalid/unknown timezone reports 'unknown', no server-time fallback
+$unknownForInvalidTz = $localTimeForTimezoneMethod->invoke($guard, 'Not/AZone');
+$test->assertEquals('unknown', $unknownForInvalidTz, "localTimeForTimezone() reports 'unknown' for invalid timezone string");
+
+// localTimeForTimezone(): null timezone (lookup failed / unknown) reports 'unknown', no server-time fallback
+$unknownForNullTz = $localTimeForTimezoneMethod->invoke($guard, null);
+$test->assertEquals('unknown', $unknownForNullTz, "localTimeForTimezone() reports 'unknown' when timezone is null");
+
 // Test invalid IPs are rejected
 $invalidIps = ['999.999.999.999', '256.1.1.1', '1.2.3.999', 'not-an-ip', '1.2.3'];
 
@@ -514,7 +529,7 @@ $guardForConnect = new Guard(
         adminRecipients: ['AdminOne'],
         onConnectMessageTemplate: '{{player_id}} is connecting from {{country_name}} ({{country_code}}), network: {{network_name}}.',
         onConnectActions: [
-            '# CONSOLE_MESSAGE {{player_id}} is connecting from {{country_name}} ({{country_code}}), network: {{network_name}}.',
+            '# CONSOLE_MESSAGE {{player_id}} is connecting from {{country_name}} ({{country_code}}), network: {{network_name}}. time={{time}}',
             'PLAYER_MESSAGE {{admin}} "{{msg}}"',
         ],
         onMatchActions: [],
@@ -535,6 +550,7 @@ $cacheProperty->setValue($guardForConnect, [
         'country' => 'Poland',
         'countryCode' => 'PL',
         'countryName' => 'Poland',
+        'timezone' => 'Europe/Warsaw',
         'expiresAt' => microtime(true) + 60,
     ],
 ]);
@@ -544,8 +560,53 @@ $guardForConnect->handleLogLine('PLAYER_ENTERED_GRID player_one 8.8.8.8 Player O
 $test->assertEquals(2, count($onConnectCommands), "onConnect emits console and admin messages");
 $test->assertContains('Poland (PL)', $onConnectCommands[0] ?? '', "CONSOLE_MESSAGE includes full country name and code");
 $test->assertContains('Orange Polska S.A.', $onConnectCommands[0] ?? '', "CONSOLE_MESSAGE includes as-name/network");
+$test->assert(preg_match('/time=\d{2}:\d{2}/', $onConnectCommands[0] ?? '') === 1, "CONSOLE_MESSAGE includes {{time}} placeholder rendered as HH:MM");
+$expectedWarsawTime = (new DateTimeImmutable('now', new DateTimeZone('Europe/Warsaw')))->format('H:i');
+$test->assertContains('time=' . $expectedWarsawTime, $onConnectCommands[0] ?? '', "join {{time}} uses player's own timezone (Europe/Warsaw) from ipinfo.io, not server local time");
 $test->assertContains('Poland (PL)', $onConnectCommands[1] ?? '', "PLAYER_MESSAGE includes full country name and code");
 $test->assertContains('Orange Polska S.A.', $onConnectCommands[1] ?? '', "PLAYER_MESSAGE includes as-name/network");
+
+$noTzCommands = [];
+$noTzRegistry = new ActionRegistry(function (string $command) use (&$noTzCommands): void {
+    $noTzCommands[] = $command;
+});
+
+$guardForNoTimezone = new Guard(
+    new IpInfoClient('https://ipinfo.io', null, 2),
+    new Matcher([['name' => 'never-match', 'pattern' => '/^$/']]),
+    $noTzRegistry,
+    new Logger(),
+    new GuardConfig(
+        adminRecipients: ['AdminOne'],
+        onConnectMessageTemplate: '{{player_id}} is connecting from {{country_name}} ({{country_code}}), network: {{network_name}}, time={{time}}.',
+        onConnectActions: ['PLAYER_MESSAGE {{admin}} "{{msg}}"'],
+        onMatchActions: [],
+        retryDelaysMs: [100],
+        maxAttempts: 1,
+        cacheTtlSeconds: 1800,
+        dedupeWindowSeconds: 15,
+    ),
+    new Metrics()
+);
+
+$noTzReflection = new ReflectionClass($guardForNoTimezone);
+$noTzCacheProperty = $noTzReflection->getProperty('ipCache');
+$noTzCacheProperty->setAccessible(true);
+$noTzCacheProperty->setValue($guardForNoTimezone, [
+    '9.9.9.9' => [
+        'networkName' => 'Unknown Provider',
+        'country' => 'Poland',
+        'countryCode' => 'PL',
+        'countryName' => 'Poland',
+        'timezone' => null,
+        'expiresAt' => microtime(true) + 60,
+    ],
+]);
+
+$guardForNoTimezone->handleLogLine('PLAYER_ENTERED_GRID player_no_tz 9.9.9.9 Player NoTZ');
+
+$test->assertEquals(1, count($noTzCommands), "onConnect emits admin message even without timezone data");
+$test->assertContains('time=unknown', $noTzCommands[0] ?? '', "join {{time}} shows 'unknown' (not server clock) when ipinfo.io provides no timezone");
 
 $multiAdminCommands = [];
 $multiAdminRegistry = new ActionRegistry(function (string $command) use (&$multiAdminCommands): void {
@@ -811,6 +872,7 @@ $playersCacheProperty->setValue($playersGuard, [
         'country' => 'United States',
         'countryCode' => 'US',
         'countryName' => 'United States',
+        'timezone' => 'America/Los_Angeles',
         'expiresAt' => microtime(true) + 60,
     ],
 ]);
@@ -828,6 +890,10 @@ $test->assertContains('PLAYER_MESSAGE internal_admin', $playerListCommands[0] ??
 $test->assertContains('name=0xffff00Player One', $playerListCommands[0] ?? '', 'Remote players response includes player_name');
 $test->assertContains('country=0xffff00United States', $playerListCommands[0] ?? '', 'Remote players response includes player_country');
 $test->assertContains('network=0xffff00Example ISP', $playerListCommands[0] ?? '', 'Remote players response includes player_network');
+$test->assert(preg_match('/time=0xffff00\d{2}:\d{2}/', $playerListCommands[0] ?? '') === 1, 'Remote players response includes time field in HH:MM format');
+
+$expectedLosAngelesTime = (new DateTimeImmutable('now', new DateTimeZone('America/Los_Angeles')))->format('H:i');
+$test->assertContains('time=0xffff00' . $expectedLosAngelesTime, $playerListCommands[0] ?? '', 'Remote players response uses player\'s own timezone (America/Los_Angeles), not server local time');
 
 $playersCommands = [];
 $playersGuard->handleLogLine('PLAYER_LEFT player_1 8.8.8.8 Player One');
