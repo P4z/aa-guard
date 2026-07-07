@@ -30,7 +30,8 @@ Player joins → Guard reads event → Guard queries IP at ipinfo.io → Guard r
 - **Admin notifications**: Guarantees per-admin join messages even if the configuration lacks `{{admin}}` template. Only sent to admins currently present (online).
 - **Comprehensive metrics**: Tracks bans, lookups, cache hits, live cache size, API errors, rate-limited events, invalid IPs, and runtime.
 - **Metrics on demand**: Periodic reports (`metricsIntervalSeconds`, `0` to disable) or manual trigger via `SIGUSR1`.
-- **Remote control**: Supports admin/mod remote commands such as `/guard metrics` and `/guard players`, replying only to the requesting user.
+- **Remote control**: Supports admin/mod remote commands such as `/guard metrics`, `/guard players`, and `/guard reload`, replying only to the requesting user.
+- **Live config reload**: Reloads `rules`, `actions`, `admins`, retry, cache/dedupe, metrics interval, and debug settings from disk without restarting, via `/guard reload` or `SIGHUP`.
 - **Online player register**: Records `player_id`, `player_name`, `player_country`, and `player_network` on join; updates tracked identity on `PLAYER_RENAMED`; removes player from list on `PLAYER_LEFT`.
 - **Graceful lifecycle**: Responds to `SIGTERM` and `SIGINT`; stops cleanly when `STDIN` closes.
 
@@ -79,6 +80,7 @@ IPINFO_TOKEN="your_token" screen -dmS aa-guard sh -c 'tail -fn0 -s0.01 /path/to/
 - `SIGTERM`: Terminate gracefully
 - `SIGINT`: Interrupt gracefully
 - `SIGUSR1`: Emit metrics immediately (requires `pcntl` extension)
+- `SIGHUP`: Reload configuration from disk immediately (requires `pcntl` extension); notifies every currently present admin of success or failure
 
 ## Remote Control
 
@@ -87,12 +89,14 @@ AA Guard can react to `INVALID_COMMAND` ladderlog lines emitted by the server wh
 ```text
 /guard metrics
 /guard players
+/guard reload
 ```
 
-Currently supported remote command:
+Currently supported remote commands:
 
 - `/guard metrics` — emits the current guard metrics only to the requesting user
 - `/guard players` — emits currently tracked online players only to the requesting user
+- `/guard reload` — reloads configuration from disk and replies to the requester with the outcome (see [Reloading Configuration](#reloading-configuration))
 
 Authorization rules:
 
@@ -228,6 +232,15 @@ Fields per line:
 
 If no players are tracked, guard replies with `No tracked players online.`
 
+### `/guard reload` Response Format
+
+A single `PLAYER_MESSAGE` reply is sent to the requester (or to every present admin for `SIGHUP`):
+
+- Success: `Configuration reloaded (<N> rules).`
+- Failure: `Config reload failed: <error message>` (e.g. missing field, invalid JSON, invalid regex)
+
+See [Reloading Configuration](#reloading-configuration) for what is and isn't reloaded.
+
 ### `actions.onDebug`
 
 Debug logging templates (emitted only when `debug=true`).
@@ -301,17 +314,31 @@ PLAYER_RENAMED player_1 player_1@clan 192.168.51.42 1 Player 1
 PLAYER_LEFT player_1 192.168.51.42 Player 1
 INVALID_COMMAND guard admin_1 192.168.51.42 2 metrics
 INVALID_COMMAND guard admin_1 192.168.51.42 2 players
+INVALID_COMMAND guard admin_1 192.168.51.42 2 reload
 ```
+
+## Reloading Configuration
+
+Configuration can be reloaded from disk without restarting the process, in two ways:
+
+- `/guard reload` — an authorized player (configured admin, or `player_level >= 2`) triggers a reload; only the requester is notified of the outcome.
+- `SIGHUP` — e.g. `kill -HUP <pid>`; reloads and notifies every currently present admin.
+
+Both paths re-run the same config validation used at startup (missing fields, invalid JSON, invalid regex, etc.). If validation fails, the guard logs the error, replies with `Config reload failed: <error>`, and **keeps running on the last-known-good configuration** — it never exits or drops the currently loaded rules/actions because of a bad reload.
+
+**What reloads:** `rules`, all `actions` templates, `admins`, `retry.maxAttempts`, `retry.delaysMs`, `cacheTtlSeconds`, `dedupeWindowSeconds`, `metricsIntervalSeconds`, `debug`.
+
+**Known limitation:** `ipInfoTimeoutSeconds` and `ipInfoRateLimitPerMinute` are consumed once when the IP lookup client is constructed at startup and are **not** picked up by reload; changing either value requires a process restart.
 
 ## Important Notes
 
-- The configuration loader exits with code `2` if a required field is missing or invalid.
-- The guard exits with code `1` if `stream_select` fails (critical I/O error).
+- The configuration loader exits with code `2` if a required field is missing or invalid at startup; the same validation errors during a `/guard reload` or `SIGHUP` reload are reported without exiting (see [Reloading Configuration](#reloading-configuration)).
+- Delivered signals (`SIGTERM`, `SIGINT`, `SIGUSR1`, `SIGHUP`) interrupt the blocking `stream_select` call (`EINTR`); the guard treats this as expected and simply retries the select on the next loop iteration instead of exiting.
 - IP lookups reject private and reserved ranges (`private_ip` error); no internal addresses are queried.
 - Invalid IPv4 addresses are rejected early and counted in the `invalid_ips` metric.
 - Deduplication is keyed on `playerId|ruleName` to prevent repeated enforcement.
 - Startup actions enable `LADDERLOG_WRITE_PLAYER_ENTERED_GRID 1`, `LADDERLOG_WRITE_PLAYER_ENTERED_SPECTATOR 1`, `LADDERLOG_WRITE_PLAYER_RENAMED 1`, `LADDERLOG_WRITE_PLAYER_LEFT 1`, and `LADDERLOG_WRITE_INVALID_COMMAND 1` in the default configuration.
-- Remote `/guard metrics` and `/guard players` requests are authorized for configured admins and users with level `2` or higher, and replies are sent only to the requester.
+- Remote `/guard metrics`, `/guard players`, and `/guard reload` requests are authorized for configured admins and users with level `2` or higher, and replies are sent only to the requester (`SIGHUP` reload instead notifies every present admin).
 - Online players are tracked by join/rename/leave events and exposed through `/guard players` with fields: `player_id`, `player_name`, `player_country`, `player_network`, `time` (player's own local time `HH:MM`, from ipinfo.io timezone data, or `unknown`).
 - `{{time}}` reflects each player's own local time, computed from the IANA timezone (e.g. `Europe/Warsaw`) that ipinfo.io reports for their IP. If the timezone is missing or invalid, `{{time}}` is `unknown` — it never falls back to the guard process's own server clock. Available in `onConnectMessage`, `onConnect`, and the `/guard players` report.
 - Metrics include last enforcement details via `last_action_who` and `last_action_why` before `runtime`.

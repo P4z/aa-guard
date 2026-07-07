@@ -15,6 +15,7 @@ final class Guard
     private Logger $logger;
     private GuardConfig $config;
     private Metrics $metrics;
+    private ?\Closure $configReloader;
 
     /** @var array<string, array{networkName:string, country:string, countryCode:string, countryName:string, timezone:?string, expiresAt:float}> */
     private array $ipCache = [];
@@ -30,13 +31,20 @@ final class Guard
 
     private float $nextHousekeepingAt = 0.0;
 
+    /**
+     * @param (\Closure():array{config:GuardConfig, matcher:Matcher})|null $configReloader
+     *   Re-reads configuration from disk and returns a fresh GuardConfig/Matcher pair.
+     *   Must throw on invalid/missing configuration; must not exit the process.
+     *   Pass null to disable `/guard reload` (it will reply with a failure message).
+     */
     public function __construct(
         IpInfoClient $ipInfoClient,
         Matcher $matcher,
         ActionRegistry $actions,
         Logger $logger,
         GuardConfig $config,
-        Metrics $metrics
+        Metrics $metrics,
+        ?\Closure $configReloader = null
     ) {
         $this->ipInfoClient = $ipInfoClient;
         $this->matcher = $matcher;
@@ -44,6 +52,7 @@ final class Guard
         $this->logger = $logger;
         $this->config = $config;
         $this->metrics = $metrics;
+        $this->configReloader = $configReloader;
     }
 
     public function getConfig(): GuardConfig
@@ -353,6 +362,13 @@ final class Guard
                 }
 
                 $this->reportPlayersForRecipient($event['playerId']);
+                break;
+            case 'reload':
+                if (!$this->isRemoteCommandAuthorized($event['playerId'], $event['playerLevel'])) {
+                    return;
+                }
+
+                $this->handleReloadCommand($event['playerId']);
                 break;
         }
     }
@@ -691,6 +707,83 @@ final class Guard
     {
         $this->logger->debug($this->buildMetricsLogString());
         $this->emitMetricsToRecipients($this->config->adminRecipients);
+    }
+
+    /**
+     * Re-reads configuration from disk via the injected reloader closure and
+     * swaps it into this instance. On failure (missing reloader, invalid
+     * config, thrown exception) the current config/matcher are left
+     * untouched so the guard keeps running with the last-known-good state.
+     *
+     * NOTE: `ipInfoTimeoutSeconds` and `ipInfoRateLimitPerMinute` are consumed
+     * once by IpInfoClient's constructor and are NOT reloaded here; changing
+     * them requires a process restart.
+     *
+     * @return array{success:bool, error:?string, ruleCount:?int}
+     */
+    public function reloadConfiguration(): array
+    {
+        if ($this->configReloader === null) {
+            return ['success' => false, 'error' => 'Config reload is not configured.', 'ruleCount' => null];
+        }
+
+        try {
+            $reloaded = ($this->configReloader)();
+        } catch (\Throwable $e) {
+            $this->logger->error(sprintf('Config reload failed: %s', $e->getMessage()));
+            return ['success' => false, 'error' => $e->getMessage(), 'ruleCount' => null];
+        }
+
+        $this->config = $reloaded['config'];
+        $this->matcher = $reloaded['matcher'];
+
+        $ruleCount = $this->matcher->getRuleCount();
+        $this->logger->debug(sprintf('Configuration reloaded (%d rules)', $ruleCount));
+
+        return ['success' => true, 'error' => null, 'ruleCount' => $ruleCount];
+    }
+
+    /**
+     * Reloads configuration and notifies every currently present admin
+     * (used by the SIGHUP handler, which has no single requesting player).
+     */
+    public function reloadConfigurationForAllAdmins(): void
+    {
+        $result = $this->reloadConfiguration();
+        $presentAdmins = $this->filterPresentAdminRecipients($this->config->adminRecipients, []);
+        $this->notifyReloadResult($result, $presentAdmins);
+    }
+
+    private function handleReloadCommand(string $admin): void
+    {
+        $result = $this->reloadConfiguration();
+        $this->notifyReloadResult($result, [$admin]);
+    }
+
+    /**
+     * @param array{success:bool, error:?string, ruleCount:?int} $result
+     * @param array<int, string> $admins
+     */
+    private function notifyReloadResult(array $result, array $admins): void
+    {
+        foreach ($admins as $admin) {
+            if ($result['success']) {
+                $this->actions->executeTemplatesWithRawValues([
+                    'PLAYER_MESSAGE {{admin}} "0x00ff00>> 0x888888[GUARD] 0xffffffConfiguration reloaded (0xffff00{{rule_count}}0xffffff rules)."',
+                ], [
+                    'admin' => $admin,
+                    'rule_count' => (string) ($result['ruleCount'] ?? 0),
+                ], []);
+                continue;
+            }
+
+            $this->actions->executeTemplatesWithRawValues([
+                'PLAYER_MESSAGE {{admin}} "0xff0000>> 0x888888[GUARD] 0xffffffConfig reload failed: 0xffff00{{error}}"',
+            ], [
+                'admin' => $admin,
+                'error' => $result['error'] ?? 'unknown error',
+            ], ['error']);
+        }
     }
 
     private function reportMetricsForRecipient(string $admin): void

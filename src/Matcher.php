@@ -19,6 +19,11 @@ final class Matcher
         $this->logger = $logger;
     }
 
+    public function getRuleCount(): int
+    {
+        return count($this->rules);
+    }
+
     /**
      * @return array{matched:bool, ruleName:?string, pattern:?string}
      */

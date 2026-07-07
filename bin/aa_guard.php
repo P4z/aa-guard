@@ -17,7 +17,13 @@ require_once __DIR__ . '/../src/autoload.php';
 const STREAM_SELECT_INTERVAL_US = 200_000;
 
 $configPath = $argv[1] ?? (__DIR__ . '/../config');
-$config = loadConfig($configPath);
+
+try {
+    $config = loadConfig($configPath);
+} catch (\RuntimeException $e) {
+    fwrite(STDERR, $e->getMessage() . "\n");
+    exit(2);
+}
 
 $metrics = new Metrics();
 $ipInfoToken = getenv('IPINFO_TOKEN');
@@ -33,7 +39,7 @@ $actions = new ActionRegistry(static function (string $command): void {
     fflush(STDOUT);
 });
 $logger = new Logger(
-    static function (string $level, string $message) use ($config, $actions): void {
+    static function (string $level, string $message) use (&$config, $actions): void {
         if (($config['debug'] ?? false) !== true) {
             return;
         }
@@ -51,25 +57,32 @@ $logger = new Logger(
 );
 $matcher = new Matcher($config['rules'], $logger);
 
+// Reloads configuration from disk for `/guard reload` and SIGHUP. Must throw
+// (never exit) on failure so Guard::reloadConfiguration() can keep the
+// last-known-good config/matcher when the new config is invalid.
+// NOTE: does not rebuild $ipInfoClient, so ipInfoTimeoutSeconds and
+// ipInfoRateLimitPerMinute changes require a process restart to take effect.
+$reloadConfig = static function () use ($configPath, $logger, &$config): array {
+    $newConfig = loadConfig($configPath);
+    // Keep $config in sync so the debug-forwarding closure above (which
+    // captured $config by reference) picks up the new admins/onDebug/debug
+    // settings too, not just Guard's own GuardConfig/Matcher.
+    $config = $newConfig;
+
+    return [
+        'config' => buildGuardConfig($newConfig),
+        'matcher' => new Matcher($newConfig['rules'], $logger),
+    ];
+};
+
 $guard = new Guard(
     $ipInfoClient,
     $matcher,
     $actions,
     $logger,
-    new GuardConfig(
-        adminRecipients:     $config['admins'],
-        onConnectMessageTemplate: $config['actions']['onConnectMessage'],
-        onConnectActions:    $config['actions']['onConnect'],
-        onMatchActions:      $config['actions']['onMatch'],
-        retryDelaysMs:       $config['retry']['delaysMs'],
-        maxAttempts:         $config['retry']['maxAttempts'],
-        cacheTtlSeconds:     $config['cacheTtlSeconds'],
-        dedupeWindowSeconds: $config['dedupeWindowSeconds'],
-        onMetricsActions:    $config['actions']['onMetrics'],
-        metricsIntervalSeconds: $config['metricsIntervalSeconds'],
-        debug:               $config['debug'],
-    ),
-    $metrics
+    buildGuardConfig($config),
+    $metrics,
+    $reloadConfig
 );
 
 stream_set_blocking(STDIN, false);
@@ -78,6 +91,7 @@ $logger->debug('AA guard started');
 
 $running = true;
 $reportMetricsPending = false;
+$reloadConfigPending = false;
 if (function_exists('pcntl_async_signals')) {
     pcntl_async_signals(true);
     pcntl_signal(SIGTERM, static function () use (&$running): void {
@@ -89,6 +103,9 @@ if (function_exists('pcntl_async_signals')) {
     pcntl_signal(SIGUSR1, static function () use (&$reportMetricsPending): void {
         $reportMetricsPending = true;
     });
+    pcntl_signal(SIGHUP, static function () use (&$reloadConfigPending): void {
+        $reloadConfigPending = true;
+    });
 }
 
 $lastMetricsAt = microtime(true);
@@ -98,10 +115,15 @@ while ($running) {
     $write = [];
     $except = [];
 
-    $result = stream_select($read, $write, $except, 0, STREAM_SELECT_INTERVAL_US);
+    $result = @stream_select($read, $write, $except, 0, STREAM_SELECT_INTERVAL_US);
     if ($result === false) {
-        $logger->error('stream_select failed, stopping guard');
-        exit(1);
+        // With pcntl_async_signals enabled, any delivered signal (SIGTERM,
+        // SIGINT, SIGUSR1, SIGHUP) interrupts a blocking stream_select with
+        // EINTR, which PHP also reports as a warning (suppressed above).
+        // This is expected, not an I/O failure: the signal handler already
+        // ran and updated its flag, so just retry the select on the next
+        // iteration instead of tearing down the guard.
+        continue;
     }
 
     if ($result > 0) {
@@ -117,6 +139,11 @@ while ($running) {
 
     $guard->processPendingChecks();
     $guard->housekeeping();
+
+    if ($reloadConfigPending) {
+        $guard->reloadConfigurationForAllAdmins();
+        $reloadConfigPending = false;
+    }
 
     // Periodic metrics reporting (disabled when metricsIntervalSeconds === 0)
     $metricsInterval = $guard->getConfig()->metricsIntervalSeconds;
@@ -137,68 +164,56 @@ function loadConfig(string $configPath): array
     }
 
     if (!isset($decoded['rules']) || !is_array($decoded['rules'])) {
-        fwrite(STDERR, "Config missing rules array\n");
-        exit(2);
+        throw new \RuntimeException('Config missing rules array');
     }
 
     // Validate each rule has required fields and valid regex pattern
     foreach ($decoded['rules'] as $index => $rule) {
         if (!isset($rule['name']) || !is_string($rule['name']) || trim($rule['name']) === '') {
-            fwrite(STDERR, "Rule #{$index} missing or invalid 'name' field\n");
-            exit(2);
+            throw new \RuntimeException("Rule #{$index} missing or invalid 'name' field");
         }
         
         if (!isset($rule['pattern']) || !is_string($rule['pattern']) || trim($rule['pattern']) === '') {
-            fwrite(STDERR, "Rule '{$rule['name']}' missing or invalid 'pattern' field\n");
-            exit(2);
+            throw new \RuntimeException("Rule '{$rule['name']}' missing or invalid 'pattern' field");
         }
         
         // Validate regex pattern to prevent ReDoS
         $testResult = @preg_match($rule['pattern'], '');
         if ($testResult === false) {
-            fwrite(STDERR, "Rule '{$rule['name']}' has invalid regex pattern: {$rule['pattern']}\n");
-            exit(2);
+            throw new \RuntimeException("Rule '{$rule['name']}' has invalid regex pattern: {$rule['pattern']}");
         }
     }
 
     if (!isset($decoded['actions']['onMatch']) || !is_array($decoded['actions']['onMatch'])) {
-        fwrite(STDERR, "Config missing actions.onMatch array\n");
-        exit(2);
+        throw new \RuntimeException('Config missing actions.onMatch array');
     }
 
     if (!isset($decoded['actions']['onConnect']) || !is_array($decoded['actions']['onConnect'])) {
-        fwrite(STDERR, "Config missing actions.onConnect array\n");
-        exit(2);
+        throw new \RuntimeException('Config missing actions.onConnect array');
     }
 
     if (!isset($decoded['actions']['onStartup']) || !is_array($decoded['actions']['onStartup'])) {
-        fwrite(STDERR, "Config missing actions.onStartup array\n");
-        exit(2);
+        throw new \RuntimeException('Config missing actions.onStartup array');
     }
 
     if (!isset($decoded['actions']['onDebug']) || !is_array($decoded['actions']['onDebug'])) {
-        fwrite(STDERR, "Config missing actions.onDebug array\n");
-        exit(2);
+        throw new \RuntimeException('Config missing actions.onDebug array');
     }
 
     if (!isset($decoded['actions']['onConnectMessage']) || !is_string($decoded['actions']['onConnectMessage']) || trim($decoded['actions']['onConnectMessage']) === '') {
-        fwrite(STDERR, "Config missing actions.onConnectMessage string\n");
-        exit(2);
+        throw new \RuntimeException('Config missing actions.onConnectMessage string');
     }
 
     if (!isset($decoded['admins']) || !is_array($decoded['admins'])) {
-        fwrite(STDERR, "Config missing admins array\n");
-        exit(2);
+        throw new \RuntimeException('Config missing admins array');
     }
 
     if (!isset($decoded['retry']['maxAttempts']) || !is_int($decoded['retry']['maxAttempts'])) {
-        fwrite(STDERR, "Config missing retry.maxAttempts integer\n");
-        exit(2);
+        throw new \RuntimeException('Config missing retry.maxAttempts integer');
     }
 
     if (!isset($decoded['retry']['delaysMs']) || !is_array($decoded['retry']['delaysMs'])) {
-        fwrite(STDERR, "Config missing retry.delaysMs array\n");
-        exit(2);
+        throw new \RuntimeException('Config missing retry.delaysMs array');
     }
 
     $decoded['cacheTtlSeconds'] = isset($decoded['cacheTtlSeconds']) && is_int($decoded['cacheTtlSeconds'])
@@ -251,21 +266,35 @@ function loadSplitConfig(string $configDir): array
 function loadJsonFile(string $path, string $label): array
 {
     if (!is_file($path)) {
-        fwrite(STDERR, "{$label} not found: {$path}\n");
-        exit(2);
+        throw new \RuntimeException("{$label} not found: {$path}");
     }
 
     $raw = file_get_contents($path);
     if ($raw === false) {
-        fwrite(STDERR, "Failed to read {$label}: {$path}\n");
-        exit(2);
+        throw new \RuntimeException("Failed to read {$label}: {$path}");
     }
 
     $decoded = json_decode($raw, true);
     if (!is_array($decoded)) {
-        fwrite(STDERR, "Invalid JSON in {$label}: {$path}\n");
-        exit(2);
+        throw new \RuntimeException("Invalid JSON in {$label}: {$path}");
     }
 
     return $decoded;
+}
+
+function buildGuardConfig(array $config): GuardConfig
+{
+    return new GuardConfig(
+        adminRecipients:     $config['admins'],
+        onConnectMessageTemplate: $config['actions']['onConnectMessage'],
+        onConnectActions:    $config['actions']['onConnect'],
+        onMatchActions:      $config['actions']['onMatch'],
+        retryDelaysMs:       $config['retry']['delaysMs'],
+        maxAttempts:         $config['retry']['maxAttempts'],
+        cacheTtlSeconds:     $config['cacheTtlSeconds'],
+        dedupeWindowSeconds: $config['dedupeWindowSeconds'],
+        onMetricsActions:    $config['actions']['onMetrics'],
+        metricsIntervalSeconds: $config['metricsIntervalSeconds'],
+        debug:               $config['debug'],
+    );
 }

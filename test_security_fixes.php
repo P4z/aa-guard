@@ -1134,6 +1134,156 @@ foreach ($expectedNonMatches as $networkName) {
 echo "\n";
 
 // ===================================================================
+// Test 11: Remote command reload
+// ===================================================================
+echo "Test 11: Remote command reload\n";
+echo str_repeat("-", 60) . "\n";
+
+$buildGuardForReloadTest = function (array $adminRecipients, array &$emittedCommands, ?\Closure $configReloader): Guard {
+    $emittedCommands = [];
+    $actionRegistry = new ActionRegistry(function (string $command) use (&$emittedCommands): void {
+        $emittedCommands[] = $command;
+    });
+
+    return new Guard(
+        new IpInfoClient('https://ipinfo.io', null, 2, 0, new Metrics()),
+        new Matcher([]),
+        $actionRegistry,
+        new Logger(),
+        new GuardConfig(
+            adminRecipients:     $adminRecipients,
+            onConnectMessageTemplate: '{{player_id}} joined from {{country_name}}',
+            onConnectActions:    [],
+            onMatchActions:      [],
+            retryDelaysMs:       [100],
+            maxAttempts:         1,
+            cacheTtlSeconds:     60,
+            dedupeWindowSeconds: 15,
+        ),
+        new Metrics(),
+        $configReloader
+    );
+};
+
+// Matcher::getRuleCount() is used to report rule counts after reload.
+$ruleCountMatcher = new Matcher([
+    ['name' => 'a', 'pattern' => '/a/i'],
+    ['name' => 'b', 'pattern' => '/b/i'],
+]);
+$test->assertEquals(2, $ruleCountMatcher->getRuleCount(), 'Matcher::getRuleCount() returns number of loaded rules');
+
+// Successful reload swaps GuardConfig/Matcher and replies only to the requester.
+$reloadSuccessCommands = [];
+$newConfigAfterReload = new GuardConfig(
+    adminRecipients:     ['internal_admin'],
+    onConnectMessageTemplate: 'reloaded',
+    onConnectActions:    [],
+    onMatchActions:      [],
+    retryDelaysMs:       [999],
+    maxAttempts:         9,
+    cacheTtlSeconds:     123,
+    dedupeWindowSeconds: 5,
+);
+$newMatcherAfterReload = new Matcher([
+    ['name' => 'vpn-test', 'pattern' => '/vpn/i'],
+    ['name' => 'proxy-test', 'pattern' => '/proxy/i'],
+]);
+$reloadSuccessGuard = $buildGuardForReloadTest(['internal_admin'], $reloadSuccessCommands, function () use ($newConfigAfterReload, $newMatcherAfterReload): array {
+    return ['config' => $newConfigAfterReload, 'matcher' => $newMatcherAfterReload];
+});
+
+$reloadSuccessGuard->handleLogLine('INVALID_COMMAND guard internal_admin 8.8.8.8 2 reload');
+
+$test->assertEquals(1, count($reloadSuccessCommands), 'Successful reload emits one confirmation message');
+$test->assertContains('PLAYER_MESSAGE internal_admin', $reloadSuccessCommands[0] ?? '', 'Reload confirmation targets the requester');
+$test->assertContains('Configuration reloaded (0xffff002', $reloadSuccessCommands[0] ?? '', 'Reload confirmation reports the new rule count (2)');
+$test->assertEquals(123, $reloadSuccessGuard->getConfig()->cacheTtlSeconds, 'GuardConfig is swapped in after successful reload');
+
+// Failed reload (reloader throws) keeps the previous config/matcher untouched.
+$reloadFailureCommands = [];
+$reloadFailureGuard = $buildGuardForReloadTest(['internal_admin'], $reloadFailureCommands, function (): array {
+    throw new \RuntimeException('Config missing rules array');
+});
+$originalCacheTtl = $reloadFailureGuard->getConfig()->cacheTtlSeconds;
+
+$reloadFailureGuard->handleLogLine('INVALID_COMMAND guard internal_admin 8.8.8.8 2 reload');
+
+$test->assertEquals(1, count($reloadFailureCommands), 'Failed reload emits one failure message');
+$test->assertContains('PLAYER_MESSAGE internal_admin', $reloadFailureCommands[0] ?? '', 'Reload failure message targets the requester');
+$test->assertContains('Config reload failed', $reloadFailureCommands[0] ?? '', 'Reload failure message states failure');
+$test->assertContains('Config missing rules array', $reloadFailureCommands[0] ?? '', 'Reload failure message includes original error');
+$test->assertEquals($originalCacheTtl, $reloadFailureGuard->getConfig()->cacheTtlSeconds, 'GuardConfig is left untouched after failed reload');
+
+// No reloader configured: reload replies with a clear failure instead of crashing.
+$reloadUnavailableCommands = [];
+$reloadUnavailableGuard = $buildGuardForReloadTest(['internal_admin'], $reloadUnavailableCommands, null);
+$reloadUnavailableGuard->handleLogLine('INVALID_COMMAND guard internal_admin 8.8.8.8 2 reload');
+
+$test->assertEquals(1, count($reloadUnavailableCommands), 'Reload without a configured reloader still replies once');
+$test->assertContains('Config reload failed', $reloadUnavailableCommands[0] ?? '', 'Reload without reloader reports failure');
+$test->assertContains('not configured', $reloadUnavailableCommands[0] ?? '', 'Reload without reloader explains it is unavailable');
+
+// Authorization mirrors /guard metrics and /guard players.
+$trivialReloader = function (): array {
+    return [
+        'config' => new GuardConfig(
+            adminRecipients:     ['internal_admin'],
+            onConnectMessageTemplate: 'x',
+            onConnectActions:    [],
+            onMatchActions:      [],
+            retryDelaysMs:       [1],
+            maxAttempts:         1,
+            cacheTtlSeconds:     1,
+            dedupeWindowSeconds: 1,
+        ),
+        'matcher' => new Matcher([]),
+    ];
+};
+
+$reloadUnauthorizedCommands = [];
+$reloadUnauthorizedGuard = $buildGuardForReloadTest(['internal_admin'], $reloadUnauthorizedCommands, $trivialReloader);
+$reloadUnauthorizedGuard->handleLogLine('INVALID_COMMAND guard regular_user 8.8.8.8 1 reload');
+$test->assertEquals(0, count($reloadUnauthorizedCommands), 'Unauthorized reload request is ignored silently');
+
+$reloadModeratorCommands = [];
+$reloadModeratorGuard = $buildGuardForReloadTest(['internal_admin'], $reloadModeratorCommands, $trivialReloader);
+$reloadModeratorGuard->handleLogLine('INVALID_COMMAND guard moderator_user 8.8.4.4 2 reload');
+$test->assertEquals(1, count($reloadModeratorCommands), 'Moderator (player_level >= 2) reload request is processed');
+$test->assertContains('PLAYER_MESSAGE moderator_user', $reloadModeratorCommands[0] ?? '', 'Moderator reload confirmation targets the moderator');
+
+// SIGHUP-style broadcast reload (reloadConfigurationForAllAdmins) notifies only present admins.
+$broadcastCommands = [];
+$broadcastGuard = $buildGuardForReloadTest(['admin_online', 'admin_offline'], $broadcastCommands, function (): array {
+    return [
+        'config' => new GuardConfig(
+            adminRecipients:     ['admin_online', 'admin_offline'],
+            onConnectMessageTemplate: 'x',
+            onConnectActions:    [],
+            onMatchActions:      [],
+            retryDelaysMs:       [1],
+            maxAttempts:         1,
+            cacheTtlSeconds:     1,
+            dedupeWindowSeconds: 1,
+        ),
+        'matcher' => new Matcher([['name' => 'r', 'pattern' => '/x/i']]),
+    ];
+});
+$broadcastReflection = new ReflectionClass($broadcastGuard);
+$broadcastOnlineProperty = $broadcastReflection->getProperty('onlinePlayers');
+$broadcastOnlineProperty->setAccessible(true);
+$broadcastOnlineProperty->setValue($broadcastGuard, [
+    'admin_online' => ['player_id' => 'admin_online', 'player_name' => 'admin_online', 'player_ip' => '5.5.5.5', 'player_country' => 'unknown', 'player_network' => 'unknown', 'player_timezone' => null],
+]);
+
+$broadcastGuard->reloadConfigurationForAllAdmins();
+
+$test->assertEquals(1, count($broadcastCommands), 'Broadcast reload notifies only present admins');
+$test->assertContains('PLAYER_MESSAGE admin_online', $broadcastCommands[0] ?? '', 'Broadcast reload confirmation targets the present admin');
+$test->assertNotContains('admin_offline', $broadcastCommands[0] ?? '', 'Broadcast reload confirmation skips the absent admin');
+
+echo "\n";
+
+// ===================================================================
 // Final Report
 // ===================================================================
 exit($test->report());
