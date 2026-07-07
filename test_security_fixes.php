@@ -555,6 +555,12 @@ $cacheProperty->setValue($guardForConnect, [
     ],
 ]);
 
+$connectOnlinePlayersProperty = $guardReflection->getProperty('onlinePlayers');
+$connectOnlinePlayersProperty->setAccessible(true);
+$connectOnlinePlayersProperty->setValue($guardForConnect, [
+    'AdminOne' => ['player_id' => 'AdminOne', 'player_name' => 'AdminOne', 'player_ip' => '1.2.3.4', 'player_country' => 'unknown', 'player_network' => 'unknown', 'player_timezone' => null],
+]);
+
 $guardForConnect->handleLogLine('PLAYER_ENTERED_GRID player_one 8.8.8.8 Player One');
 
 $test->assertEquals(2, count($onConnectCommands), "onConnect emits console and admin messages");
@@ -603,6 +609,12 @@ $noTzCacheProperty->setValue($guardForNoTimezone, [
     ],
 ]);
 
+$noTzOnlinePlayersProperty = $noTzReflection->getProperty('onlinePlayers');
+$noTzOnlinePlayersProperty->setAccessible(true);
+$noTzOnlinePlayersProperty->setValue($guardForNoTimezone, [
+    'AdminOne' => ['player_id' => 'AdminOne', 'player_name' => 'AdminOne', 'player_ip' => '1.2.3.4', 'player_country' => 'unknown', 'player_network' => 'unknown', 'player_timezone' => null],
+]);
+
 $guardForNoTimezone->handleLogLine('PLAYER_ENTERED_GRID player_no_tz 9.9.9.9 Player NoTZ');
 
 $test->assertEquals(1, count($noTzCommands), "onConnect emits admin message even without timezone data");
@@ -647,9 +659,16 @@ $multiCacheProperty->setValue($guardForMultiAdmin, [
     ],
 ]);
 
+$multiOnlinePlayersProperty = $multiGuardReflection->getProperty('onlinePlayers');
+$multiOnlinePlayersProperty->setAccessible(true);
+$multiOnlinePlayersProperty->setValue($guardForMultiAdmin, [
+    'AdminOne' => ['player_id' => 'AdminOne', 'player_name' => 'AdminOne', 'player_ip' => '5.5.5.5', 'player_country' => 'unknown', 'player_network' => 'unknown', 'player_timezone' => null],
+    'AdminTwo' => ['player_id' => 'AdminTwo', 'player_name' => 'AdminTwo', 'player_ip' => '6.6.6.6', 'player_country' => 'unknown', 'player_network' => 'unknown', 'player_timezone' => null],
+]);
+
 $guardForMultiAdmin->handleLogLine('PLAYER_ENTERED_GRID player_two 1.1.1.1 Player Two');
 
-$test->assertEquals(3, count($multiAdminCommands), "One console message and two admin messages are emitted for two admins");
+$test->assertEquals(3, count($multiAdminCommands), "One console message and two admin messages are emitted for two present admins");
 $test->assertContains('# CONSOLE_MESSAGE', $multiAdminCommands[0] ?? '', "First command is single CONSOLE_MESSAGE");
 $test->assertContains('AdminOne', $multiAdminCommands[1] ?? '', "Second command targets first admin");
 $test->assertContains('AdminTwo', $multiAdminCommands[2] ?? '', "Third command targets second admin");
@@ -959,9 +978,17 @@ $test->assertContains('Spectator One', $playerListRows[1] ?? '', 'Remote players
 $remoteJoinMetrics = new Metrics();
 $remoteJoinCommands = [];
 $remoteJoinGuard = $buildGuardForRemoteCommandTest(['internal_admin'], $remoteJoinCommands, $remoteJoinMetrics);
+
+$remoteJoinReflection = new ReflectionClass($remoteJoinGuard);
+$remoteJoinOnlinePlayersProperty = $remoteJoinReflection->getProperty('onlinePlayers');
+$remoteJoinOnlinePlayersProperty->setAccessible(true);
+$remoteJoinOnlinePlayersProperty->setValue($remoteJoinGuard, [
+    'internal_admin' => ['player_id' => 'internal_admin', 'player_name' => 'internal_admin', 'player_ip' => '7.7.7.7', 'player_country' => 'unknown', 'player_network' => 'unknown', 'player_timezone' => null],
+]);
+
 $remoteJoinGuard->handleLogLine('PLAYER_ENTERED_GRID player_three 8.8.8.8 Player Three');
 $test->assert(count($remoteJoinCommands) >= 1, 'PLAYER_ENTERED_GRID handling still works alongside remote commands');
-$test->assertContains('PLAYER_MESSAGE internal_admin', $remoteJoinCommands[0] ?? '', 'Join handling still emits admin-targeted connect message');
+$test->assertContains('PLAYER_MESSAGE internal_admin', $remoteJoinCommands[0] ?? '', 'Join handling still emits admin-targeted connect message to present admin');
 
 echo "\n";
 
@@ -998,20 +1025,34 @@ $buildGuardForJoinTest = function (array $onConnectActions, array &$emittedComma
     );
 };
 
-// Before fix this case emitted 0 admin messages. Now it must emit one per admin.
+// Before fix this case emitted 0 admin messages. Now it must emit one per present admin.
 $commandsMissingAdminTemplate = [];
 $guardMissingAdminTemplate = $buildGuardForJoinTest(['CONSOLE_MESSAGE {{msg}}'], $commandsMissingAdminTemplate);
+$missingAdminTemplateReflection = new ReflectionClass($guardMissingAdminTemplate);
+$missingAdminTemplateOnlineProperty = $missingAdminTemplateReflection->getProperty('onlinePlayers');
+$missingAdminTemplateOnlineProperty->setAccessible(true);
+$missingAdminTemplateOnlineProperty->setValue($guardMissingAdminTemplate, [
+    'admin_1' => ['player_id' => 'admin_1', 'player_name' => 'admin_1', 'player_ip' => '3.3.3.3', 'player_country' => 'unknown', 'player_network' => 'unknown', 'player_timezone' => null],
+    'admin_2' => ['player_id' => 'admin_2', 'player_name' => 'admin_2', 'player_ip' => '4.4.4.4', 'player_country' => 'unknown', 'player_network' => 'unknown', 'player_timezone' => null],
+]);
 $guardMissingAdminTemplate->handleLogLine('PLAYER_ENTERED_GRID p1 8.8.8.8 Player One');
 
 $adminMessages = array_values(array_filter(
     $commandsMissingAdminTemplate,
     static fn (string $command): bool => str_starts_with($command, 'PLAYER_MESSAGE admin_')
 ));
-$test->assertEquals(2, count($adminMessages), 'Emits fallback admin join message for each admin when onConnect has no {{admin}} template');
+$test->assertEquals(2, count($adminMessages), 'Emits fallback admin join message for each present admin when onConnect has no {{admin}} template');
 
 // If config already has an admin-targeted template, fallback must not duplicate it.
 $commandsWithAdminTemplate = [];
 $guardWithAdminTemplate = $buildGuardForJoinTest(['PLAYER_MESSAGE {{admin}} "{{msg}}"'], $commandsWithAdminTemplate);
+$withAdminTemplateReflection = new ReflectionClass($guardWithAdminTemplate);
+$withAdminTemplateOnlineProperty = $withAdminTemplateReflection->getProperty('onlinePlayers');
+$withAdminTemplateOnlineProperty->setAccessible(true);
+$withAdminTemplateOnlineProperty->setValue($guardWithAdminTemplate, [
+    'admin_1' => ['player_id' => 'admin_1', 'player_name' => 'admin_1', 'player_ip' => '3.3.3.3', 'player_country' => 'unknown', 'player_network' => 'unknown', 'player_timezone' => null],
+    'admin_2' => ['player_id' => 'admin_2', 'player_name' => 'admin_2', 'player_ip' => '4.4.4.4', 'player_country' => 'unknown', 'player_network' => 'unknown', 'player_timezone' => null],
+]);
 $guardWithAdminTemplate->handleLogLine('PLAYER_ENTERED_GRID p2 1.1.1.1 Player Two');
 
 $adminMessagesWithTemplate = array_values(array_filter(
@@ -1019,6 +1060,31 @@ $adminMessagesWithTemplate = array_values(array_filter(
     static fn (string $command): bool => str_starts_with($command, 'PLAYER_MESSAGE admin_')
 ));
 $test->assertEquals(2, count($adminMessagesWithTemplate), 'Does not duplicate admin join message when {{admin}} template already exists');
+
+// Regression test for reported bug: an {{admin}}-templated onConnect message must be
+// sent ONLY to admins currently present (tracked online), never to absent admins.
+$presenceCommands = [];
+$guardForPresenceCheck = $buildGuardForJoinTest(['PLAYER_MESSAGE {{admin}} "{{msg}}"'], $presenceCommands);
+$presenceReflection = new ReflectionClass($guardForPresenceCheck);
+$presenceOnlineProperty = $presenceReflection->getProperty('onlinePlayers');
+$presenceOnlineProperty->setAccessible(true);
+// Only admin_1 is present (e.g. logged in); admin_2 is absent, mirroring the
+// reported case where 'dplmr' was offline yet still received a PLAYER_MESSAGE.
+$presenceOnlineProperty->setValue($guardForPresenceCheck, [
+    'admin_1' => ['player_id' => 'admin_1', 'player_name' => 'admin_1', 'player_ip' => '3.3.3.3', 'player_country' => 'unknown', 'player_network' => 'unknown', 'player_timezone' => null],
+]);
+$guardForPresenceCheck->handleLogLine('PLAYER_ENTERED_GRID p3 8.8.8.8 Player Three');
+
+$presentAdminMessages = array_values(array_filter(
+    $presenceCommands,
+    static fn (string $command): bool => str_starts_with($command, 'PLAYER_MESSAGE admin_')
+));
+$test->assertEquals(1, count($presentAdminMessages), 'Only present admins receive the {{admin}}-templated join message');
+$test->assertContains('PLAYER_MESSAGE admin_1', $presentAdminMessages[0] ?? '', 'Present admin (admin_1) receives the join message');
+$test->assertNotContains('admin_2', $presentAdminMessages[0] ?? '', 'Absent admin (admin_2) is not targeted');
+foreach ($presenceCommands as $presenceCommand) {
+    $test->assertNotContains('admin_2', $presenceCommand, 'Absent admin (admin_2) receives no command at all');
+}
 
 echo "\n";
 

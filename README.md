@@ -27,7 +27,7 @@ Player joins → Guard reads event → Guard queries IP at ipinfo.io → Guard r
   - Rule match responses (`actions.onMatch`)
   - Periodic metrics reports (`actions.onMetrics`)
   - Debug forwarding (`actions.onDebug`, when `debug=true`)
-- **Admin notifications**: Guarantees per-admin join messages even if the configuration lacks `{{admin}}` template.
+- **Admin notifications**: Guarantees per-admin join messages even if the configuration lacks `{{admin}}` template. Only sent to admins currently present (online).
 - **Comprehensive metrics**: Tracks bans, lookups, cache hits, live cache size, API errors, rate-limited events, invalid IPs, and runtime.
 - **Metrics on demand**: Periodic reports (`metricsIntervalSeconds`, `0` to disable) or manual trigger via `SIGUSR1`.
 - **Remote control**: Supports admin/mod remote commands such as `/guard metrics` and `/guard players`, replying only to the requesting user.
@@ -175,9 +175,9 @@ Executed for each player join.
 - `{{admin}}` – Admin username (only in admin-targeted templates)
 
 **Behaviour:**
-- Templates with `{{admin}}` are emitted once per admin in the `admins` array.
+- Templates with `{{admin}}` are emitted once per admin currently present in the tracked online player list. Absent admins do not receive `onConnect` output.
 - Templates without `{{admin}}` are emitted once per join.
-- If no admin-targeted template is present, the guard automatically sends: `PLAYER_MESSAGE {{admin}} "{{msg}}"`
+- If no admin-targeted template is present, the guard automatically sends: `PLAYER_MESSAGE {{admin}} "{{msg}}"` to each present admin.
 
 ### `actions.onMatch`
 

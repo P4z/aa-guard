@@ -605,11 +605,12 @@ final class Guard
         ];
         $baseContext['msg'] = $this->renderOnConnectMessage($baseContext);
         $emittedAdminMessage = false;
+        $presentAdmins = $this->filterPresentAdminRecipients($this->config->adminRecipients, []);
 
         foreach ($this->config->onConnectActions as $template) {
             if (str_contains($template, '{{admin}}')) {
                 $emittedAdminMessage = true;
-                foreach ($this->config->adminRecipients as $admin) {
+                foreach ($presentAdmins as $admin) {
                     $context = array_merge($baseContext, ['admin' => $admin]);
                     $this->actions->executeTemplatesWithRawValues([$template], $context, ['msg']);
                 }
@@ -619,9 +620,9 @@ final class Guard
             $this->actions->executeTemplatesWithRawValues([$template], $baseContext, ['msg']);
         }
 
-        // Guarantee at least one admin-targeted join message per admin on every join.
-        if (!$emittedAdminMessage && !empty($this->config->adminRecipients)) {
-            foreach ($this->config->adminRecipients as $admin) {
+        // Guarantee at least one admin-targeted join message per present admin on every join.
+        if (!$emittedAdminMessage && !empty($presentAdmins)) {
+            foreach ($presentAdmins as $admin) {
                 $context = array_merge($baseContext, ['admin' => $admin]);
                 $this->actions->executeTemplatesWithRawValues(['PLAYER_MESSAGE {{admin}} "{{msg}}"'], $context, ['msg']);
             }
