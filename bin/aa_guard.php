@@ -28,7 +28,7 @@ try {
 $metrics = new Metrics();
 $ipInfoToken = getenv('IPINFO_TOKEN');
 $ipInfoClient = new IpInfoClient(
-    'https://ipinfo.io',
+    $config['ipInfoBaseUrl'],
     is_string($ipInfoToken) ? $ipInfoToken : null,
     $config['ipInfoTimeoutSeconds'],
     $config['ipInfoRateLimitPerMinute'],
@@ -38,23 +38,9 @@ $actions = new ActionRegistry(static function (string $command): void {
     fwrite(STDOUT, $command . PHP_EOL);
     fflush(STDOUT);
 });
-$logger = new Logger(
-    static function (string $level, string $message) use (&$config, $actions): void {
-        if (($config['debug'] ?? false) !== true) {
-            return;
-        }
-
-        foreach ($config['admins'] as $admin) {
-            $actions->executeTemplatesWithRawValues([
-                ...$config['actions']['onDebug'],
-            ], [
-                'admin' => $admin,
-                'level' => $level,
-                'msg' => $message,
-            ], ['msg']);
-        }
-    }
-);
+// Forwarder is attached after $guard exists (see below) so it can filter to
+// currently present admins instead of messaging everyone in the admin list.
+$logger = new Logger();
 $matcher = new Matcher($config['rules'], $logger);
 
 // Reloads configuration from disk for `/guard reload` and SIGHUP. Must throw
@@ -64,9 +50,10 @@ $matcher = new Matcher($config['rules'], $logger);
 // ipInfoRateLimitPerMinute changes require a process restart to take effect.
 $reloadConfig = static function () use ($configPath, $logger, &$config): array {
     $newConfig = loadConfig($configPath);
-    // Keep $config in sync so the debug-forwarding closure above (which
-    // captured $config by reference) picks up the new admins/onDebug/debug
-    // settings too, not just Guard's own GuardConfig/Matcher.
+    // Keep $config in sync so the debug-forwarding closure below (which
+    // captured $config by reference) picks up the new onDebug/debug
+    // settings too, not just Guard's own GuardConfig/Matcher. Admin presence
+    // for the forwarder comes from $guard's own (also reloaded) config instead.
     $config = $newConfig;
 
     return [
@@ -83,6 +70,26 @@ $guard = new Guard(
     buildGuardConfig($config),
     $metrics,
     $reloadConfig
+);
+
+// Only forward debug logs to admins currently tracked as online, matching
+// the presence filtering already applied to onConnect/onMetrics/reload output.
+$logger->setLogForwarder(
+    static function (string $level, string $message) use (&$config, $actions, $guard): void {
+        if (($config['debug'] ?? false) !== true) {
+            return;
+        }
+
+        foreach ($guard->getPresentAdminRecipients() as $admin) {
+            $actions->executeTemplatesWithRawValues([
+                ...$config['actions']['onDebug'],
+            ], [
+                'admin' => $admin,
+                'level' => $level,
+                'msg' => $message,
+            ], ['msg']);
+        }
+    }
 );
 
 stream_set_blocking(STDIN, false);
@@ -223,6 +230,10 @@ function loadConfig(string $configPath): array
     $decoded['dedupeWindowSeconds'] = isset($decoded['dedupeWindowSeconds']) && is_int($decoded['dedupeWindowSeconds'])
         ? $decoded['dedupeWindowSeconds']
         : 15;
+
+    $decoded['ipInfoBaseUrl'] = isset($decoded['ipInfoBaseUrl']) && is_string($decoded['ipInfoBaseUrl']) && trim($decoded['ipInfoBaseUrl']) !== ''
+        ? trim($decoded['ipInfoBaseUrl'])
+        : 'https://ipinfo.io';
 
     $decoded['ipInfoTimeoutSeconds'] = isset($decoded['ipInfoTimeoutSeconds']) && is_int($decoded['ipInfoTimeoutSeconds'])
         ? $decoded['ipInfoTimeoutSeconds']

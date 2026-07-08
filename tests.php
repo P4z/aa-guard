@@ -1349,6 +1349,89 @@ $test->assertNotContains('admin_offline', $broadcastCommands[0] ?? '', 'Broadcas
 echo "\n";
 
 // ===================================================================
+// Test 12: Quote-escaping regression (F1 security fix, 2026-07-08)
+// ===================================================================
+echo "Test 12: Quote-escaping in /guard players and /guard metrics (F1 fix)\n";
+echo str_repeat("-", 60) . "\n";
+
+// A rendered command is "well-formed" here if, after removing every escaped
+// quote (\"), exactly 2 unescaped quotes remain: the template's own opening
+// and closing delimiter. More than 2 means an attacker-controlled value broke
+// out of the quoted argument.
+$hasWellFormedQuoting = static function (string $command): bool {
+    return substr_count(str_replace('\\"', '', $command), '"') === 2;
+};
+
+$quotePlayersMetrics = new Metrics();
+$quotePlayersCommands = [];
+$quotePlayersGuard = $buildGuardForRemoteCommandTest(['internal_admin'], $quotePlayersCommands, $quotePlayersMetrics);
+$quotePlayersReflection = new ReflectionClass($quotePlayersGuard);
+$quotePlayersOnlineProperty = $quotePlayersReflection->getProperty('onlinePlayers');
+$quotePlayersOnlineProperty->setAccessible(true);
+$quotePlayersOnlineProperty->setValue($quotePlayersGuard, [
+    'p4"drop' => [
+        'player_id' => 'p4"drop',
+        'player_name' => 'Player "Quote" Name',
+        'player_ip' => '8.8.8.8',
+        'player_country' => 'Some "Place"',
+        'player_network' => 'Net "Work"',
+        'player_timezone' => null,
+    ],
+]);
+
+$quotePlayersGuard->handleLogLine('INVALID_COMMAND guard internal_admin 8.8.8.8 2 players');
+
+$quotePlayersRow = array_values(array_filter(
+    $quotePlayersCommands,
+    static fn (string $command): bool => str_contains($command, 'id=0xffff00')
+));
+
+$test->assertEquals(1, count($quotePlayersRow), '/guard players emits one row for a player with a quote in id/name');
+$test->assertContains('\\"', $quotePlayersRow[0] ?? '', '/guard players escapes embedded double quotes');
+$test->assertEquals(true, $hasWellFormedQuoting($quotePlayersRow[0] ?? ''), '/guard players output has no unescaped quote breakout');
+
+$realOnMetricsTemplates = (json_decode((string) file_get_contents(__DIR__ . '/config/actions.json'), true))['onMetrics'] ?? [];
+
+$quoteMetricsMetrics = new Metrics();
+$quoteMetricsMetrics->recordLastAction('p4"drop', 'vpn"rule');
+$quoteMetricsCommands = [];
+$quoteMetricsRegistry = new ActionRegistry(function (string $command) use (&$quoteMetricsCommands): void {
+    $quoteMetricsCommands[] = $command;
+});
+$quoteMetricsGuard = new Guard(
+    new IpInfoClient('https://ipinfo.io', null, 2, 0, $quoteMetricsMetrics),
+    new Matcher([]),
+    $quoteMetricsRegistry,
+    new Logger(),
+    new GuardConfig(
+        adminRecipients:     ['internal_admin'],
+        onConnectMessageTemplate: 'x',
+        onConnectActions:    [],
+        onMatchActions:      [],
+        retryDelaysMs:       [100],
+        maxAttempts:         1,
+        cacheTtlSeconds:     60,
+        dedupeWindowSeconds: 15,
+        onMetricsActions:    $realOnMetricsTemplates,
+    ),
+    $quoteMetricsMetrics
+);
+$quoteMetricsReflection = new ReflectionClass($quoteMetricsGuard);
+$quoteMetricsOnlineProperty = $quoteMetricsReflection->getProperty('onlinePlayers');
+$quoteMetricsOnlineProperty->setAccessible(true);
+$quoteMetricsOnlineProperty->setValue($quoteMetricsGuard, [
+    'internal_admin' => ['player_id' => 'internal_admin', 'player_name' => 'internal_admin', 'player_ip' => '1.2.3.4', 'player_country' => 'unknown', 'player_network' => 'unknown', 'player_timezone' => null],
+]);
+
+$quoteMetricsGuard->reportMetrics();
+
+$test->assertEquals(1, count($quoteMetricsCommands), '/guard metrics emits one command to the present admin');
+$test->assertContains('\\"', $quoteMetricsCommands[0] ?? '', '/guard metrics escapes embedded double quotes in last_action_who/why');
+$test->assertEquals(true, $hasWellFormedQuoting($quoteMetricsCommands[0] ?? ''), '/guard metrics output has no unescaped quote breakout');
+
+echo "\n";
+
+// ===================================================================
 // Final Report
 // ===================================================================
 exit($test->report());

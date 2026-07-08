@@ -17,6 +17,18 @@ final class Logger
         $this->logForwarder = $logForwarder;
     }
 
+    /**
+     * Sets/replaces the log forwarder after construction. Used when the
+     * forwarder needs to reference an object (e.g. Guard) that cannot exist
+     * yet at Logger-construction time.
+     *
+     * @param null|callable(string, string):void $logForwarder
+     */
+    public function setLogForwarder(?callable $logForwarder): void
+    {
+        $this->logForwarder = $logForwarder;
+    }
+
     public function debug(string $message): void
     {
         $this->write('DEBUG', $message);

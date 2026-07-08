@@ -9,6 +9,7 @@
   },
   "cacheTtlSeconds": 604800,
   "dedupeWindowSeconds": 15,
+  "ipInfoBaseUrl": "https://ipinfo.io",
   "ipInfoTimeoutSeconds": 2,
   "ipInfoRateLimitPerMinute": 30,
   "metricsIntervalSeconds": 900,

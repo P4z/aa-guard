@@ -124,6 +124,7 @@ Legacy single-file configuration remains supported if a JSON file path is provid
 | `retry.delaysMs` | int | Yes | – | Delay (ms) between each retry attempt |
 | `cacheTtlSeconds` | int | No | `1800` | IP cache lifetime in seconds |
 | `dedupeWindowSeconds` | int | No | `15` | Deduplication window for repeated matches |
+| `ipInfoBaseUrl` | string | No | `https://ipinfo.io` | Base URL for the GeoIP lookup API (ipinfo.io or a compatible endpoint) |
 | `ipInfoTimeoutSeconds` | int | No | `2` | API request timeout in seconds |
 | `ipInfoRateLimitPerMinute` | int | No | `30` | Maximum API calls per minute |
 | `metricsIntervalSeconds` | int | No | `0` | Periodic metrics report interval (`0` = disabled) |
@@ -306,6 +307,7 @@ Placeholders are optional; typically static commands.
   },
   "cacheTtlSeconds": 604800,
   "dedupeWindowSeconds": 15,
+  "ipInfoBaseUrl": "https://ipinfo.io",
   "ipInfoTimeoutSeconds": 2,
   "ipInfoRateLimitPerMinute": 30,
   "metricsIntervalSeconds": 300,

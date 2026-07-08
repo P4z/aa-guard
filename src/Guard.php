@@ -60,6 +60,19 @@ final class Guard
         return $this->config;
     }
 
+    /**
+     * Admin recipients (from the current, reload-aware config) who are
+     * currently tracked as online. Used by callers outside this class (e.g.
+     * the debug-log forwarder in bin/aa_guard.php) that need the same
+     * presence filtering already applied to onConnect/onMetrics/reload output.
+     *
+     * @return array<int, string>
+     */
+    public function getPresentAdminRecipients(): array
+    {
+        return $this->filterPresentAdminRecipients($this->config->adminRecipients, []);
+    }
+
     public function handleLogLine(string $line): void
     {
         $event = $this->parsePlayerEnteredGrid($line);
@@ -833,6 +846,9 @@ final class Guard
         uasort($players, static fn (array $a, array $b): int => strcmp($a['player_id'], $b['player_id']));
 
         foreach ($players as $player) {
+            // player_id/player_name/player_country/player_network are attacker/third-party
+            // controlled and sit inside the quoted message below, so they must go through
+            // the quote-escaping (raw) path, not the plain sanitizer (which never escapes `"`).
             $this->actions->executeTemplatesWithRawValues([
                 'PLAYER_MESSAGE {{admin}} "0x00ff00>> 0x888888[GUARD] 0xffffffid=0xffff00{{player_id}} 0xffffffname=0xffff00{{player_name}} 0xffffffcountry=0xffff00{{player_country}} 0xffffffnetwork=0xffff00{{player_network}} 0xfffffftime=0xffff00{{time}}"',
             ], [
@@ -842,7 +858,7 @@ final class Guard
                 'player_country' => $player['player_country'],
                 'player_network' => $player['player_network'],
                 'time' => $this->localTimeForTimezone($player['player_timezone'] ?? null),
-            ], []);
+            ], ['player_id', 'player_name', 'player_country', 'player_network']);
         }
     }
 
@@ -876,9 +892,13 @@ final class Guard
 
         $context = $this->buildMetricsContext();
         foreach ($presentAdminRecipients as $admin) {
-            $this->actions->executeTemplates(
+            // last_action_who/last_action_why are attacker-controlled (a past offender's own
+            // player_id / matched rule name) and the shipped onMetrics template embeds them
+            // inside a quoted string, so they must use the quote-escaping (raw) path.
+            $this->actions->executeTemplatesWithRawValues(
                 $this->config->onMetricsActions,
-                array_merge($context, ['admin' => $admin])
+                array_merge($context, ['admin' => $admin]),
+                ['last_action_who', 'last_action_why']
             );
         }
     }
