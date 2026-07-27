@@ -66,5 +66,9 @@
     {
         "name": "nullrouted",
         "pattern": "/datacamp/i"
+    },
+    {
+        "name": "Cyberzone",
+        "pattern": "/cyberzone/i"
     }
 ]
