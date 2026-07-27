@@ -178,11 +178,11 @@ $command = $commands[0];
 $test->assertContains('{mtp}stabber', $command, "Preserves clan-tag braces in player ID");
 
 // Unicode, accented chars, and exotic punctuation found in real player names
-$nicknameInputs = ['player_id' => '$+3\\@|+# ├│ ^* </s>'];
+$nicknameInputs = ['player_id' => '$+3\\@|+# ó ^* </s>'];
 $commands = [];
 $registry->executeTemplates(['KICK 0xffffff{{player_id}}'], $nicknameInputs);
 $command = $commands[0];
-$test->assertContains('$+3\\@|+# ├│ ^* </s>', $command, "Preserves unicode and exotic nickname chars");
+$test->assertContains('$+3\\@|+# ó ^* </s>', $command, "Preserves unicode and exotic nickname chars");
 
 // Actual newline in a player name would split the emitted line into two commands.
 // It must be stripped.
