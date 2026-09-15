@@ -20,7 +20,7 @@ final class Guard
     /** @var array<string, array{networkName:string, country:string, countryCode:string, countryName:string, timezone:?string, expiresAt:float}> */
     private array $ipCache = [];
 
-    /** @var array<string, array{playerId:string, ip:string, displayName:string, attempts:int, nextAttemptAt:float}> */
+    /** @var array<string, array{ip:string, attempts:int, nextAttemptAt:float}> */
     private array $pendingChecks = [];
 
     /** @var array<string, float> */
@@ -29,6 +29,7 @@ final class Guard
     /** @var array<string, array{player_id:string, player_name:string, player_ip:string, player_country:string, player_network:string, player_timezone:?string}> */
     private array $onlinePlayers = [];
 
+    private int $nextPlayerSessionId = 1;
     private float $nextHousekeepingAt = 0.0;
 
     /**
@@ -77,13 +78,13 @@ final class Guard
     {
         $event = $this->parsePlayerEnteredGrid($line);
         if ($event !== null) {
-            $this->evaluatePlayer($event['playerId'], $event['ip'], $event['displayName'], 0);
+            $this->startPlayerEvaluation($event['playerId'], $event['ip'], $event['displayName']);
             return;
         }
 
         $spectatorEvent = $this->parsePlayerEnteredSpectator($line);
         if ($spectatorEvent !== null) {
-            $this->evaluatePlayer($spectatorEvent['playerId'], $spectatorEvent['ip'], $spectatorEvent['displayName'], 0);
+            $this->startPlayerEvaluation($spectatorEvent['playerId'], $spectatorEvent['ip'], $spectatorEvent['displayName']);
             return;
         }
 
@@ -114,13 +115,19 @@ final class Guard
     {
         $now = microtime(true);
 
-        foreach ($this->pendingChecks as $key => $pending) {
+        foreach ($this->pendingChecks as $playerKey => $pending) {
             if ($pending['nextAttemptAt'] > $now) {
                 continue;
             }
 
-            unset($this->pendingChecks[$key]);
-            $this->evaluatePlayer($pending['playerId'], $pending['ip'], $pending['displayName'], $pending['attempts']);
+            unset($this->pendingChecks[$playerKey]);
+
+            if ($this->getActivePlayer((string) $playerKey, $pending['ip']) === null) {
+                $this->logger->debug(sprintf('Cancelled stale IP lookup for %s', $pending['ip']));
+                continue;
+            }
+
+            $this->evaluatePlayer((string) $playerKey, $pending['attempts'], $pending['ip']);
         }
     }
 
@@ -451,8 +458,22 @@ final class Guard
         return false;
     }
 
-    private function evaluatePlayer(string $playerId, string $ip, string $displayName, int $attempt): void
+    private function startPlayerEvaluation(string $playerId, string $ip, string $displayName): void
     {
+        $playerKey = $this->recordOnlinePlayer($playerId, $displayName, $ip);
+        $this->evaluatePlayer($playerKey, 0, $ip);
+    }
+
+    private function evaluatePlayer(string $playerKey, int $attempt, string $expectedIp): void
+    {
+        $player = $this->getActivePlayer($playerKey, $expectedIp);
+        if ($player === null) {
+            $this->logger->debug(sprintf('Cancelled stale IP lookup for %s', $expectedIp));
+            return;
+        }
+
+        $playerId = $player['player_id'];
+        $ip = $player['player_ip'];
         $lookup = $this->getLookupData($ip);
 
         $countryName = 'unknown';
@@ -479,7 +500,20 @@ final class Guard
         }
 
         $country = $countryName !== 'unknown' ? $countryName : $countryCode;
-        $this->recordOnlinePlayer($playerId, $displayName, $ip, $country, $networkName, $timezone);
+
+        // A delayed lookup belongs to one tracked connection, not to a nickname.
+        // Rename keeps the same storage key; leave/reconnect removes or replaces it.
+        $player = $this->getActivePlayer($playerKey, $ip);
+        if ($player === null) {
+            $this->logger->debug(sprintf('Cancelled stale IP lookup for %s', $ip));
+            return;
+        }
+
+        $this->onlinePlayers[$playerKey]['player_country'] = $country;
+        $this->onlinePlayers[$playerKey]['player_network'] = $networkName;
+        $this->onlinePlayers[$playerKey]['player_timezone'] = $timezone;
+
+        $playerId = $player['player_id'];
 
         if ($attempt === 0) {
             $this->emitConnectionNote($playerId, $countryCode, $countryName, $networkName, $timezone);
@@ -489,7 +523,7 @@ final class Guard
             $overrideDelayMs = $this->ipInfoClient->isRateLimited()
                 ? $this->ipInfoClient->getRateLimitRetryAfterMs()
                 : null;
-            $this->scheduleRetry($playerId, $ip, $displayName, $attempt + 1, $overrideDelayMs);
+            $this->scheduleRetry($playerKey, $ip, $attempt + 1, $overrideDelayMs);
             return;
         }
 
@@ -498,6 +532,17 @@ final class Guard
             $this->logger->debug(sprintf('No banned match for %s (%s) network=%s', $playerId, $ip, $networkName));
             return;
         }
+
+        // Resolve current values immediately before action. Rename may change
+        // player_id/display_name, but IP and stable session key must still match.
+        $player = $this->getActivePlayer($playerKey, $ip);
+        if ($player === null) {
+            $this->logger->debug(sprintf('Cancelled stale matched action for %s', $ip));
+            return;
+        }
+
+        $playerId = $player['player_id'];
+        $displayName = $player['player_name'];
 
         $dedupeKey = $playerId . '|' . $match['ruleName'];
         if ($this->isDuplicateAction($dedupeKey)) {
@@ -529,28 +574,34 @@ final class Guard
     private function recordOnlinePlayer(
         string $playerId,
         string $playerName,
-        string $ip,
-        string $country,
-        string $networkName,
-        ?string $timezone = null
-    ): void {
-        $this->onlinePlayers[$playerId] = [
+        string $ip
+    ): string {
+        // A fresh enter event supersedes any stale tracked connection using the
+        // same player_id. Its old pending lookup must never target the new one.
+        foreach ($this->onlinePlayers as $existingKey => $existingPlayer) {
+            if ($existingPlayer['player_id'] === $playerId) {
+                unset($this->onlinePlayers[$existingKey], $this->pendingChecks[$existingKey]);
+            }
+        }
+
+        $playerKey = sprintf('p:%s:%d', $playerId, $this->nextPlayerSessionId++);
+        $this->onlinePlayers[$playerKey] = [
             'player_id' => $playerId,
             'player_name' => $playerName,
             'player_ip' => $ip,
-            'player_country' => $country,
-            'player_network' => $networkName,
-            'player_timezone' => $timezone,
+            'player_country' => 'unknown',
+            'player_network' => 'unknown',
+            'player_timezone' => null,
         ];
+
+        return $playerKey;
     }
 
     private function handlePlayerLeft(string $playerId, string $ip): void
     {
-        unset($this->onlinePlayers[$playerId]);
-
-        foreach ($this->pendingChecks as $key => $pending) {
-            if ($pending['playerId'] === $playerId || ($pending['playerId'] . '|' . $pending['ip']) === ($playerId . '|' . $ip)) {
-                unset($this->pendingChecks[$key]);
+        foreach ($this->onlinePlayers as $playerKey => $player) {
+            if ($player['player_id'] === $playerId && $player['player_ip'] === $ip) {
+                unset($this->onlinePlayers[$playerKey], $this->pendingChecks[$playerKey]);
             }
         }
 
@@ -559,37 +610,54 @@ final class Guard
 
     private function handlePlayerRenamed(string $oldPlayerId, string $newPlayerId, string $ip, string $displayName): void
     {
-        if (isset($this->onlinePlayers[$oldPlayerId])) {
-            $player = $this->onlinePlayers[$oldPlayerId];
-            unset($this->onlinePlayers[$oldPlayerId]);
-
-            $player['player_id'] = $newPlayerId;
-            $player['player_name'] = $displayName;
-            $player['player_ip'] = $ip;
-
-            $this->onlinePlayers[$newPlayerId] = $player;
-        } elseif (isset($this->onlinePlayers[$newPlayerId])) {
-            $this->onlinePlayers[$newPlayerId]['player_name'] = $displayName;
-            $this->onlinePlayers[$newPlayerId]['player_ip'] = $ip;
-        }
-
-        foreach ($this->pendingChecks as $key => $pending) {
-            if ($pending['playerId'] !== $oldPlayerId) {
+        foreach ($this->onlinePlayers as $playerKey => $player) {
+            if ($player['player_id'] !== $oldPlayerId) {
                 continue;
             }
 
-            unset($this->pendingChecks[$key]);
-            $pending['playerId'] = $newPlayerId;
-            $pending['displayName'] = $displayName;
-            $this->pendingChecks[$newPlayerId . '|' . $pending['ip']] = $pending;
+            if ($player['player_ip'] !== $ip) {
+                unset($this->onlinePlayers[$playerKey], $this->pendingChecks[$playerKey]);
+                $this->logger->warning(sprintf(
+                    'Cancelled tracked session after rename IP mismatch: %s -> %s (expected %s, got %s)',
+                    $oldPlayerId,
+                    $newPlayerId,
+                    $player['player_ip'],
+                    $ip
+                ));
+                return;
+            }
+
+            $this->onlinePlayers[$playerKey]['player_id'] = $newPlayerId;
+            $this->onlinePlayers[$playerKey]['player_name'] = $displayName;
+            $this->logger->debug(sprintf(
+                'Player renamed: %s -> %s (%s), updated tracked session',
+                $oldPlayerId,
+                $newPlayerId,
+                $ip
+            ));
+            return;
         }
 
-        $this->logger->debug(sprintf(
-            'Player renamed: %s -> %s (%s), updated tracked online players',
-            $oldPlayerId,
-            $newPlayerId,
-            $ip
-        ));
+        // Some login transitions repeat the already-current player_id.
+        foreach ($this->onlinePlayers as $playerKey => $player) {
+            if ($player['player_id'] === $newPlayerId && $player['player_ip'] === $ip) {
+                $this->onlinePlayers[$playerKey]['player_name'] = $displayName;
+                return;
+            }
+        }
+    }
+
+    /**
+     * @return array{player_id:string, player_name:string, player_ip:string, player_country:string, player_network:string, player_timezone:?string}|null
+     */
+    private function getActivePlayer(string $playerKey, string $expectedIp): ?array
+    {
+        $player = $this->onlinePlayers[$playerKey] ?? null;
+        if ($player === null || $player['player_ip'] !== $expectedIp) {
+            return null;
+        }
+
+        return $player;
     }
 
     /**
@@ -700,12 +768,17 @@ final class Guard
     }
 
     private function scheduleRetry(
-        string $playerId,
+        string $playerKey,
         string $ip,
-        string $displayName,
         int $attempt,
         ?int $delayMsOverride = null
     ): void {
+        $player = $this->getActivePlayer($playerKey, $ip);
+        if ($player === null) {
+            return;
+        }
+
+        $playerId = $player['player_id'];
         if ($attempt > $this->config->maxAttempts) {
             $this->logger->warning(sprintf('Giving up IP lookup for %s (%s) after %d attempts', $playerId, $ip, $attempt - 1));
             return;
@@ -717,19 +790,15 @@ final class Guard
                 ?? 1000);
         $nextAttemptAt = microtime(true) + ($delayMs / 1000);
 
-        $key = $playerId . '|' . $ip;
-
         // Don't overwrite a pending retry that is already at a higher attempt count.
         // This prevents a fast reconnect from resetting the retry counter, which
         // could allow infinite retries if the player keeps reconnecting.
-        if (isset($this->pendingChecks[$key]) && $this->pendingChecks[$key]['attempts'] >= $attempt) {
+        if (isset($this->pendingChecks[$playerKey]) && $this->pendingChecks[$playerKey]['attempts'] >= $attempt) {
             return;
         }
 
-        $this->pendingChecks[$key] = [
-            'playerId' => $playerId,
+        $this->pendingChecks[$playerKey] = [
             'ip' => $ip,
-            'displayName' => $displayName,
             'attempts' => $attempt,
             'nextAttemptAt' => $nextAttemptAt,
         ];
@@ -911,8 +980,9 @@ final class Guard
     private function filterPresentAdminRecipients(array $adminRecipients, array $knownPresentRecipients): array
     {
         $presentAdminIds = [];
-        foreach (array_keys($this->onlinePlayers) as $playerId) {
-            $normalized = strtolower(trim($playerId));
+        foreach ($this->onlinePlayers as $player) {
+            $playerId = $player['player_id'];
+            $normalized = strtolower(trim((string) $playerId));
             if ($normalized !== '') {
                 $presentAdminIds[$normalized] = true;
             }

@@ -988,7 +988,7 @@ $test->assertContains('No tracked players online.', $playersCommands[0] ?? '', '
 
 $playersCommands = [];
 $playersGuard->handleLogLine('PLAYER_ENTERED_GRID vanbozo 8.8.8.8 vanbozo');
-$playersGuard->handleLogLine('PLAYER_RENAMED vanbozo vanbozo@rcl 192.168.51.69 1 vanbozo');
+$playersGuard->handleLogLine('PLAYER_RENAMED vanbozo vanbozo@rcl 8.8.8.8 1 vanbozo');
 $playersGuard->handleLogLine('INVALID_COMMAND guard internal_admin 8.8.8.8 2 players');
 
 $renamedPlayerListCommands = array_values(array_filter(
@@ -1428,6 +1428,130 @@ $quoteMetricsGuard->reportMetrics();
 $test->assertEquals(1, count($quoteMetricsCommands), '/guard metrics emits one command to the present admin');
 $test->assertContains('\\"', $quoteMetricsCommands[0] ?? '', '/guard metrics escapes embedded double quotes in last_action_who/why');
 $test->assertEquals(true, $hasWellFormedQuoting($quoteMetricsCommands[0] ?? ''), '/guard metrics output has no unescaped quote breakout');
+
+echo "\n";
+
+// ===================================================================
+// Test 13: Delayed network result follows player session across rename
+// ===================================================================
+echo "Test 13: Delayed network result follows player session\n";
+echo str_repeat("-", 60) . "\n";
+
+$sessionCommands = [];
+$sessionMetrics = new Metrics();
+$sessionGuard = new Guard(
+    new IpInfoClient('https://ipinfo.io', null, 2, 0, $sessionMetrics),
+    new Matcher([['name' => 'VPN', 'pattern' => '/vpn/i']]),
+    new ActionRegistry(function (string $command) use (&$sessionCommands): void {
+        $sessionCommands[] = $command;
+    }),
+    new Logger(),
+    new GuardConfig(
+        adminRecipients:     ['1'],
+        onConnectMessageTemplate: '{{player_id}} joined',
+        onConnectActions:    [],
+        onMatchActions:      ['KICK 0xffffff{{player_id}} banned'],
+        retryDelaysMs:       [1],
+        maxAttempts:         2,
+        cacheTtlSeconds:     60,
+        dedupeWindowSeconds: 15,
+    ),
+    $sessionMetrics
+);
+
+$sessionReflection = new ReflectionClass($sessionGuard);
+$sessionCacheProperty = $sessionReflection->getProperty('ipCache');
+$sessionCacheProperty->setAccessible(true);
+$sessionPendingProperty = $sessionReflection->getProperty('pendingChecks');
+$sessionPendingProperty->setAccessible(true);
+$sessionOnlineProperty = $sessionReflection->getProperty('onlinePlayers');
+$sessionOnlineProperty->setAccessible(true);
+
+$sessionCacheProperty->setValue($sessionGuard, [
+    '31.175.142.34' => [
+        'networkName' => 'SFR',
+        'country' => 'France',
+        'countryCode' => 'FR',
+        'countryName' => 'France',
+        'timezone' => 'Europe/Paris',
+        'expiresAt' => microtime(true) + 60,
+    ],
+]);
+
+// Trusted player already exists. Attacker takes "white", lookup is delayed,
+// then attacker renames to numeric player_id "1".
+$sessionGuard->handleLogLine('PLAYER_ENTERED_GRID Mr_White 31.175.142.34 Mr White');
+$sessionGuard->handleLogLine('PLAYER_ENTERED_GRID white 146.70.8.10 white');
+$sessionGuard->handleLogLine('PLAYER_RENAMED white 1 146.70.8.10 0 1');
+
+$onlinePlayers = $sessionOnlineProperty->getValue($sessionGuard);
+$storageKeys = array_keys($onlinePlayers);
+$test->assertEquals(
+    true,
+    count($storageKeys) === 2 && count(array_filter(
+        $storageKeys,
+        static fn ($key): bool => is_string($key) && str_starts_with($key, 'p:')
+    )) === 2,
+    'Player storage uses string p: session keys, including numeric player_id'
+);
+
+try {
+    $test->assertEquals(['1'], $sessionGuard->getPresentAdminRecipients(), 'Numeric player_id does not cause trim() TypeError');
+} catch (Throwable $e) {
+    $test->assert(false, 'Numeric player_id does not cause trim() TypeError: ' . $e->getMessage());
+}
+
+$sessionCache = $sessionCacheProperty->getValue($sessionGuard);
+$sessionCache['146.70.8.10'] = [
+    'networkName' => 'Example VPN',
+    'country' => 'Sweden',
+    'countryCode' => 'SE',
+    'countryName' => 'Sweden',
+    'timezone' => 'Europe/Stockholm',
+    'expiresAt' => microtime(true) + 60,
+];
+$sessionCacheProperty->setValue($sessionGuard, $sessionCache);
+
+$pendingChecks = $sessionPendingProperty->getValue($sessionGuard);
+foreach ($pendingChecks as &$pendingCheck) {
+    $pendingCheck['nextAttemptAt'] = 0.0;
+}
+unset($pendingCheck);
+$sessionPendingProperty->setValue($sessionGuard, $pendingChecks);
+$sessionGuard->processPendingChecks();
+
+$kickCommands = array_values(array_filter(
+    $sessionCommands,
+    static fn (string $command): bool => str_starts_with($command, 'KICK ')
+));
+$test->assertEquals(1, count($kickCommands), 'Delayed banned-network result emits one kick');
+$test->assertEquals('KICK 0xffffff1 banned', $kickCommands[0] ?? '', 'Delayed result kicks attacker by current numeric nick');
+$test->assertNotContains('white', $kickCommands[0] ?? '', 'Delayed result does not use stale nick');
+$test->assertNotContains('Mr White', implode("\n", $sessionCommands), 'Delayed result never targets trusted Mr White');
+$test->assertNotContains('Mr_White', implode("\n", $sessionCommands), 'Delayed result never targets trusted Mr_White player_id');
+$test->assertNotContains('p:', implode("\n", $sessionCommands), 'Internal p: storage key never reaches emitted commands');
+
+// Leaving player invalidates pending lookup.
+$kickCountBeforeLeave = count($kickCommands);
+$sessionGuard->handleLogLine('PLAYER_ENTERED_GRID leaver 146.70.8.11 leaver');
+$sessionGuard->handleLogLine('PLAYER_LEFT leaver 146.70.8.11 leaver');
+$pendingChecks = $sessionPendingProperty->getValue($sessionGuard);
+foreach ($pendingChecks as &$pendingCheck) {
+    $pendingCheck['nextAttemptAt'] = 0.0;
+}
+unset($pendingCheck);
+$sessionPendingProperty->setValue($sessionGuard, $pendingChecks);
+$sessionGuard->processPendingChecks();
+$kickCommandsAfterLeave = array_values(array_filter(
+    $sessionCommands,
+    static fn (string $command): bool => str_starts_with($command, 'KICK ')
+));
+$test->assertEquals($kickCountBeforeLeave, count($kickCommandsAfterLeave), 'Leave cancels delayed action');
+
+// Rename carrying different IP invalidates session instead of retargeting it.
+$sessionGuard->handleLogLine('PLAYER_ENTERED_GRID ip_swap 146.70.8.12 ip_swap');
+$sessionGuard->handleLogLine('PLAYER_RENAMED ip_swap renamed 146.70.8.13 0 renamed');
+$test->assertEquals([], $sessionPendingProperty->getValue($sessionGuard), 'Rename IP mismatch cancels pending lookup');
 
 echo "\n";
 
