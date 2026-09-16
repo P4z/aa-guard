@@ -57,7 +57,7 @@
     },
     {
         "name": "Hosting/Datacenter/Cloud",
-        "pattern": "/hosting|datacenter|cloud/i"
+        "pattern": "/hosted|hosting|datacenter|cloud/i"
     },
     {
         "name": "VPN",
@@ -70,5 +70,9 @@
     {
         "name": "Cyberzone",
         "pattern": "/cyberzone/i"
+    },
+    {
+        "name": "Velia",
+        "pattern": "/velia/i"
     }
 ]

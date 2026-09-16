@@ -1556,6 +1556,131 @@ $test->assertEquals([], $sessionPendingProperty->getValue($sessionGuard), 'Renam
 echo "\n";
 
 // ===================================================================
+// Test 14: PLAYER_LEFT with an explicitly empty IP column
+// ===================================================================
+echo "Test 14: PLAYER_LEFT with empty IP column\n";
+echo str_repeat("-", 60) . "\n";
+
+$leftMetrics = new Metrics();
+$leftLogs = [];
+$leftGuard = new Guard(
+    new IpInfoClient('https://ipinfo.io', null, 2, 0, $leftMetrics),
+    new Matcher([]),
+    new ActionRegistry(static function (string $command): void {}),
+    new Logger(static function (string $level, string $message) use (&$leftLogs): void {
+        $leftLogs[] = ['level' => $level, 'message' => $message];
+    }),
+    new GuardConfig(
+        adminRecipients: [],
+        onConnectMessageTemplate: '',
+        onConnectActions: [],
+        onMatchActions: [],
+        retryDelaysMs: [100],
+        maxAttempts: 1,
+        cacheTtlSeconds: 60,
+        dedupeWindowSeconds: 15,
+    ),
+    $leftMetrics
+);
+$leftReflection = new ReflectionClass($leftGuard);
+$parsePlayerLeft = $leftReflection->getMethod('parsePlayerLeft');
+$leftOnline = $leftReflection->getProperty('onlinePlayers');
+$leftPending = $leftReflection->getProperty('pendingChecks');
+
+$test->assertEquals(
+    ['playerId' => 'player_1', 'ip' => '192.0.2.10', 'displayName' => 'Player 1'],
+    $parsePlayerLeft->invoke($leftGuard, 'PLAYER_LEFT player_1 192.0.2.10 Player 1'),
+    'Normal PLAYER_LEFT parses validated IPv4 and display name'
+);
+$test->assertEquals(
+    ['playerId' => '5', 'ip' => null, 'displayName' => '5'],
+    $parsePlayerLeft->invoke($leftGuard, 'PLAYER_LEFT 5  5'),
+    'Empty IP column parses as null'
+);
+$test->assertEquals(
+    ['playerId' => '5', 'ip' => null, 'displayName' => 'Player Five'],
+    $parsePlayerLeft->invoke($leftGuard, "PLAYER_LEFT 5\t\tPlayer Five"),
+    'Two horizontal tabs mark an empty IP column'
+);
+foreach ([
+    'PLAYER_LEFT 5',
+    'PLAYER_LEFT 5 5',
+    'PLAYER_LEFT 5 bad-ip Name',
+    'PLAYER_LEFT 5 999.999.999.999 Name',
+    'PLAYER_LEFT 5 2001:db8::1 Name',
+    "PLAYER_LEFT 5\n 5",
+    "PLAYER_LEFT 5  \n5",
+] as $malformedLeft) {
+    $test->assertEquals(null, $parsePlayerLeft->invoke($leftGuard, $malformedLeft), 'Malformed PLAYER_LEFT rejected: ' . var_export($malformedLeft, true));
+}
+
+$leftGuard->handleLogLine('PLAYER_ENTERED_GRID player_1 149.102.224.181 Player 1');
+$leftGuard->handleLogLine('PLAYER_ENTERED_GRID player_10 149.102.224.181 Player 10');
+$normalOnline = $leftOnline->getValue($leftGuard);
+$normalPending = $leftPending->getValue($leftGuard);
+$matchingKey = array_key_first($normalOnline);
+$normalOnline['p:other-ip'] = $normalOnline[$matchingKey];
+$normalOnline['p:other-ip']['player_ip'] = '149.102.224.182';
+$normalPending['p:other-ip'] = $normalPending[$matchingKey];
+$normalPending['p:other-ip']['ip'] = '149.102.224.182';
+$leftOnline->setValue($leftGuard, $normalOnline);
+$leftPending->setValue($leftGuard, $normalPending);
+$leftGuard->handleLogLine('PLAYER_LEFT player_1 149.102.224.181 Player 1');
+$remaining = array_values($leftOnline->getValue($leftGuard));
+$test->assertEquals(['player_10', 'player_1'], array_column($remaining, 'player_id'), 'Normal leave removes only exact ID and IP pair');
+$test->assertEquals('149.102.224.182', $remaining[1]['player_ip'], 'Normal leave preserves same ID with different IP');
+$test->assertEquals(2, count($leftPending->getValue($leftGuard)), 'Normal leave removes only matching pending check');
+
+$leftOnline->setValue($leftGuard, []);
+$leftPending->setValue($leftGuard, []);
+$leftGuard->handleLogLine('PLAYER_ENTERED_GRID 5 149.102.224.181 5');
+$test->assertEquals(1, count($leftPending->getValue($leftGuard)), 'Failed lookup creates pending check for numeric ID');
+$leftGuard->handleLogLine('PLAYER_LEFT 5  5');
+$test->assertEquals([], $leftOnline->getValue($leftGuard), 'Empty-IP leave removes numeric player session');
+$test->assertEquals([], $leftPending->getValue($leftGuard), 'Empty-IP leave removes matching pending check');
+$test->assertEquals(true, count(array_filter(
+    $leftLogs,
+    static fn (array $entry): bool => str_contains($entry['message'], 'PLAYER_LEFT')
+        && str_contains($entry['message'], 'player_id')
+)) > 0, 'Empty-IP leave logs exact player_id fallback');
+
+// Same ID can remain in stale duplicate sessions after a rename; remove all.
+$leftGuard->handleLogLine('PLAYER_ENTERED_GRID 5 149.102.224.181 5');
+$duplicateOnline = $leftOnline->getValue($leftGuard);
+$duplicatePending = $leftPending->getValue($leftGuard);
+$duplicateOnline['p:duplicate'] = $duplicateOnline[array_key_first($duplicateOnline)];
+$duplicatePending['p:duplicate'] = $duplicatePending[array_key_first($duplicatePending)];
+$leftOnline->setValue($leftGuard, $duplicateOnline);
+$leftPending->setValue($leftGuard, $duplicatePending);
+$leftGuard->handleLogLine('PLAYER_ENTERED_GRID 15 149.102.224.181 15');
+$leftGuard->handleLogLine('PLAYER_ENTERED_GRID player_5 149.102.224.181 player_5');
+$leftGuard->handleLogLine('PLAYER_LEFT 5  5');
+$remaining = array_values($leftOnline->getValue($leftGuard));
+$test->assertEquals(['15', 'player_5'], array_column($remaining, 'player_id'), 'Empty-IP leave removes all exact ID duplicates, not substring IDs');
+$test->assertEquals(2, count($leftPending->getValue($leftGuard)), 'Pending checks for substring IDs remain, duplicate exact ID checks disappear');
+
+$leftOnline->setValue($leftGuard, []);
+$leftPending->setValue($leftGuard, []);
+foreach ([
+    'PLAYER_ENTERED_GRID 5 149.102.224.181 5',
+    'PLAYER_RENAMED 5 4 149.102.224.181 0 4',
+    'PLAYER_RENAMED 4 5 149.102.224.181 0 5',
+    'PLAYER_LEFT 5  5',
+    'PLAYER_ENTERED_GRID 3 149.102.224.181 3',
+    'PLAYER_LEFT 3  3',
+    'PLAYER_ENTERED_GRID 4 149.102.224.181 4',
+    'PLAYER_RENAMED 4 3 149.102.224.181 0 3',
+    'PLAYER_RENAMED 3 6 149.102.224.181 0 6',
+    'PLAYER_LEFT 6  6',
+] as $line) {
+    $leftGuard->handleLogLine($line);
+}
+$test->assertEquals([], $leftOnline->getValue($leftGuard), 'Observed rename and leave sequence leaves no numeric zombie sessions');
+$test->assertEquals([], $leftPending->getValue($leftGuard), 'Observed rename and leave sequence leaves no pending checks');
+
+echo "\n";
+
+// ===================================================================
 // Final Report
 // ===================================================================
 exit($test->report());

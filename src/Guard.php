@@ -218,7 +218,7 @@ final class Guard
     }
 
     /**
-     * @return array{playerId:string, ip:string, displayName:string}|null
+     * @return array{playerId:string, ip:?string, displayName:string}|null
      */
     private function parsePlayerLeft(string $line): ?array
     {
@@ -228,15 +228,25 @@ final class Guard
         }
 
         $matches = [];
-        $ok = preg_match('/^PLAYER_LEFT\s+(\S+)\s+(\S+)\s+(.+)$/', $trimmed, $matches);
-        if ($ok !== 1) {
+        if (preg_match('/^PLAYER_LEFT[ \t]+(\S+)[ \t]+(\S+)[ \t]+([^\r\n]+)\z/', $trimmed, $matches) === 1
+            && filter_var($matches[2], FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false
+        ) {
+            return [
+                'playerId' => $matches[1],
+                'ip' => $matches[2],
+                'displayName' => $matches[3],
+            ];
+        }
+
+        // Two horizontal separators mark the missing IP column.
+        if (preg_match('/^PLAYER_LEFT[ \t]+(\S+)[ \t]{2,}([^\r\n]+)\z/', $trimmed, $matches) !== 1) {
             return null;
         }
 
         return [
             'playerId' => $matches[1],
-            'ip' => $matches[2],
-            'displayName' => $matches[3],
+            'ip' => null,
+            'displayName' => $matches[2],
         ];
     }
 
@@ -597,12 +607,17 @@ final class Guard
         return $playerKey;
     }
 
-    private function handlePlayerLeft(string $playerId, string $ip): void
+    private function handlePlayerLeft(string $playerId, ?string $ip): void
     {
         foreach ($this->onlinePlayers as $playerKey => $player) {
-            if ($player['player_id'] === $playerId && $player['player_ip'] === $ip) {
+            if ($player['player_id'] === $playerId && ($ip === null || $player['player_ip'] === $ip)) {
                 unset($this->onlinePlayers[$playerKey], $this->pendingChecks[$playerKey]);
             }
+        }
+
+        if ($ip === null) {
+            $this->logger->debug(sprintf('PLAYER_LEFT without IP: removed tracked sessions by exact player_id %s', $playerId));
+            return;
         }
 
         $this->logger->debug(sprintf('Player left: %s (%s), removed from tracked online players', $playerId, $ip));
